@@ -76,9 +76,6 @@ def main(argv=sys.argv[1:]):
     )
     scene = Scene.random_arrangement(object_meshes, support_mesh)
 
-    # show the random scene in 3D viewer
-    scene.colorize().as_trimesh_scene().show()
-
     if args.show_grasps:
         # load gripper mesh for collision check
         gripper_mesh = trimesh.load(
@@ -115,8 +112,10 @@ def main(argv=sys.argv[1:]):
 
         # show scene together with successful and collision-free grasps of all objects
         trimesh.scene.scene.append_scenes(
-            [scene.colorize().as_trimesh_scene(), trimesh.Scene(gripper_markers)]
+            [scene.as_trimesh_scene(), trimesh.Scene(gripper_markers)]
         ).show()
+    else:
+        scene.as_trimesh_scene().show()
 
 
 if __name__ == "__main__":

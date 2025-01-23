@@ -159,9 +159,10 @@ class Scene(object):
 
         # get stable poses for object
         stable_obj = obj_mesh.copy()
-        stable_obj.vertices -= stable_obj.center_mass
+        stable_obj.vertices -= stable_obj.center_mass if stable_obj.is_watertight else stable_obj.centroid
         stable_poses, stable_poses_probs = stable_obj.compute_stable_poses(
-            threshold=0, sigma=0, n_samples=1
+            threshold=0, sigma=0, n_samples=1,
+            center_mass=stable_obj.center_mass if stable_obj.is_watertight else stable_obj.centroid
         )
         # stable_poses, stable_poses_probs = obj_mesh.compute_stable_poses(threshold=0, sigma=0, n_samples=1)
 
@@ -297,10 +298,11 @@ class Scene(object):
             brightness (float, optional): Brightness of colors. Defaults to 1.0.
         """
         if not specific_objects:
-            for obj_id, obj_mesh in self._objects.items():
-                obj_mesh.visual.face_colors[:, :3] = (
-                    trimesh.visual.random_color() * brightness
-                )[:3]
+            for obj_mesh in self._objects.values():
+                if isinstance(obj_mesh.visual, trimesh.visual.color.ColorVisuals):
+                    obj_mesh.visual.face_colors[:, :3] = (
+                        trimesh.visual.random_color() * brightness
+                    )[:3]
         else:
             for object_id, color in specific_objects.items():
                 self._objects[object_id].visual.face_colors[:, :3] = color
@@ -340,7 +342,8 @@ class Scene(object):
         s = cls()
         s.add_object("support_object", support_mesh, pose=np.eye(4), support=True)
 
-        for i, obj_mesh in enumerate(object_meshes):
+        from tqdm import tqdm
+        for i, obj_mesh in enumerate(tqdm(object_meshes, desc="Placing meshes")):
             s.place_object(
                 "obj{}".format(i),
                 obj_mesh,
@@ -374,6 +377,16 @@ def load_mesh(filename, mesh_root_dir, scale=None):
 
     obj_mesh = trimesh.load(os.path.join(mesh_root_dir, mesh_fname))
     obj_mesh = obj_mesh.apply_scale(mesh_scale)
+
+    if isinstance(obj_mesh, trimesh.Scene):
+        for geom in obj_mesh.geometry.values():
+            from PIL import Image
+            geom.visual.material.image = Image.fromarray(np.reshape(geom.visual.material.main_color, (1, 1, -1)))
+            geom.visual.uv = np.zeros((geom.vertices.shape[0], 2))
+            geom.visual = geom.visual.to_color()
+        obj_mesh = obj_mesh.to_mesh()
+
+    obj_mesh.vertices -= obj_mesh.centroid # TODO: requires shifting grasp annotations
 
     return obj_mesh
 
