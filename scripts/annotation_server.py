@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Cookie
 from pydantic import BaseModel
 import os
 
@@ -34,14 +34,12 @@ class MeshResponse(BaseModel):
     mesh: dict
 
 class AnnotationSubmission(BaseModel):
-    username: str
     object_category: str
     object_id: str
     grasp_id: int
     description: str
 
 class MalformedMeshSubmission(BaseModel):
-    username: str
     object_category: str
     object_id: str
 
@@ -71,14 +69,15 @@ async def get_object_grasp():
     )
 
 @app.post("/api/submit-annotation")
-async def submit_annotation(request: AnnotationSubmission):
+async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie(...)):
     category = request.object_category
     obj_id = request.object_id
     grasp_id = request.grasp_id
 
     annotation_counts[category][obj_id].add(grasp_id)
+    print(f"User ID: {user_id}")
     print(request)
 
 @app.post("/api/submit-malformed")
-async def malformed_mesh(request: MalformedMeshSubmission):
+async def malformed_mesh(request: MalformedMeshSubmission, user_id: str = Cookie(...)):
     print(request)

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import './AnnotationForm.css'; // Import the CSS file for styling
 
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
-    const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState(false);
 
@@ -12,14 +11,12 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
         if (isMalformed) {
             endpoint = "/api/submit-malformed";
             data = {
-                "username": name,
                 "object_category": category,
                 "object_id": object_id
             };
         } else {
             endpoint = "/api/submit-annotation";
             data = {
-                "username": name,
                 "object_category": category,
                 "object_id": object_id,
                 "grasp_id": grasp_id,
@@ -56,18 +53,8 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
         <form onSubmit={handleSubmit} className="annotation-form">
             <div className="form-group">
                 <label>
-                    Name:
-                    <input
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                    />
-                </label>
-            </div>
-            <div className="form-group">
-                <label>
                     Description:
+                    <br />
                     <textarea
                         value={isMalformed ? "" : description}
                         onChange={(e) => setDescription(e.target.value)}

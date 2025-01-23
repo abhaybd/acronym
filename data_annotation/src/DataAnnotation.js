@@ -6,9 +6,11 @@ import './DataAnnotation.css'; // Import the CSS file for styling
 
 const DataAnnotation = () => {
   const [meshData, setMeshData] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const fetchMeshData = async () => {
     try {
+      setLoading(true);
       setMeshData(null);
       const response = await fetch('/api/get-object-grasp', {
         method: 'POST'
@@ -17,6 +19,8 @@ const DataAnnotation = () => {
       setMeshData(data);
     } catch (error) {
       console.error('Error fetching mesh data:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -38,11 +42,14 @@ const DataAnnotation = () => {
 
   return (
     <div className="data-annotation-container">
-      <button onClick={fetchMeshData} className="fetch-button">Fetch Mesh</button>
+      <button onClick={fetchMeshData} className="fetch-button" disabled={loading}>
+        {loading ? 'Loading...' : 'Fetch Mesh'}
+      </button>
       <div className="content-container">
         <div className="canvas-container">
+          {loading && <div className="spinner"></div>}
           {meshData && (
-            <Canvas>
+            <Canvas camera={{ position: [0, 0.4, 0.6], near: 0.05, far: 20, fov: 45 }}>
               <ambientLight intensity={0.5} />
               <pointLight position={[10, 10, 10]} />
               <Mesh

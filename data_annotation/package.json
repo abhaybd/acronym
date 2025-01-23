@@ -11,7 +11,9 @@
     "react-scripts": "5.0.1",
     "three": "0.172.0",
     "@react-three/fiber": "^8.17.12",
-    "@react-three/drei": "9.121.3"
+    "@react-three/drei": "9.121.3",
+    "react-cookie": "7.2.2",
+    "uuid": "11.0.5"
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object":"^7.21.11"

@@ -2,7 +2,7 @@
     background-color: #fdf5e6; /* light tan */
     padding: 20px;
     border-radius: 10px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -20,10 +20,8 @@ label {
     color: #333;
 }
 
-input[type="text"],
 textarea {
     width: 100%;
-    /* padding: 10px; */
     border: 1px solid #ccc;
     border-radius: 5px;
 }
