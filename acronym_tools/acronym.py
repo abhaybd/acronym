@@ -28,6 +28,7 @@ import trimesh
 import trimesh.path
 import trimesh.transformations as tra
 import numpy as np
+from PIL import Image
 
 
 class Scene(object):
@@ -353,6 +354,16 @@ class Scene(object):
 
         return s
 
+def bake_texture(mesh: trimesh.Trimesh):
+    if isinstance(mesh.visual, trimesh.visual.color.ColorVisuals):
+        return mesh
+    elif isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals):
+        mesh.visual.material.image = Image.fromarray(np.reshape(mesh.visual.material.main_color, (1, 1, -1)))
+        mesh.visual.uv = np.zeros((mesh.vertices.shape[0], 2))
+        mesh.visual = mesh.visual.to_color()
+        return mesh
+    else:
+        raise ValueError("Unsupported visual type")
 
 def load_mesh(filename, mesh_root_dir, scale=None):
     """Load a mesh from a JSON or HDF5 file from the grasp dataset. The mesh will be scaled accordingly.
@@ -380,11 +391,12 @@ def load_mesh(filename, mesh_root_dir, scale=None):
 
     if isinstance(obj_mesh, trimesh.Scene):
         for geom in obj_mesh.geometry.values():
-            from PIL import Image
-            geom.visual.material.image = Image.fromarray(np.reshape(geom.visual.material.main_color, (1, 1, -1)))
-            geom.visual.uv = np.zeros((geom.vertices.shape[0], 2))
-            geom.visual = geom.visual.to_color()
+            bake_texture(geom)
         obj_mesh = obj_mesh.to_mesh()
+    elif isinstance(obj_mesh, trimesh.Trimesh):
+        bake_texture(obj_mesh)
+    else:
+        raise ValueError("Unsupported mesh type")
 
     obj_mesh.vertices -= obj_mesh.centroid # TODO: requires shifting grasp annotations
 

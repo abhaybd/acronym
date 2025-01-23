@@ -1,14 +1,15 @@
 import React from 'react';
-import MeshViewer from './MeshViewer';
+import DataAnnotation from './DataAnnotation';
+import './App.css'; // Import the CSS file for styling
 
 function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>3D Mesh Annotation</h1>
+        <h1>Grasp Description Annotation</h1>
       </header>
-      <main>
-        <MeshViewer />
+      <main className="App-main">
+        <DataAnnotation />
       </main>
     </div>
   );
