@@ -398,7 +398,7 @@ def load_mesh(filename, mesh_root_dir, scale=None):
     else:
         raise ValueError("Unsupported mesh type")
 
-    obj_mesh.vertices -= obj_mesh.centroid # TODO: requires shifting grasp annotations
+    # obj_mesh.vertices -= obj_mesh.centroid # TODO: requires shifting grasp annotations
 
     return obj_mesh
 

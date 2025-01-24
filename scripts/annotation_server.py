@@ -53,17 +53,23 @@ async def get_object_grasp():
     # obj_id = min(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
 
     object_mesh: trimesh.Trimesh = load_mesh(f"data/grasps/{category}_{obj_id}.h5", "data")
-    visual: trimesh.visual.ColorVisuals = object_mesh.visual
 
-    # TODO: select grasp and render
+    T, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
+    successful_grasp_ids = np.argwhere(success == 1).flatten()
+    grasp_id = np.random.choice(successful_grasp_ids)
+    gripper_marker = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
+
+    scene = trimesh.Scene([object_mesh, gripper_marker])
+    geom: trimesh.Trimesh = scene.to_mesh()
+    visual: trimesh.visual.ColorVisuals = geom.visual
 
     return MeshResponse(
         object_category=category,
         object_id=obj_id,
-        grasp_id=0,
+        grasp_id=grasp_id,
         mesh={
-            "vertices": object_mesh.vertices.flatten().tolist(),
-            "faces": object_mesh.faces.flatten().tolist(),
+            "vertices": geom.vertices.flatten().tolist(),
+            "faces": geom.faces.flatten().tolist(),
             "vertex_colors": (visual.vertex_colors[:,:3] / 255).flatten().tolist(),
         }
     )
