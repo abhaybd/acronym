@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { BsFillInfoCircleFill } from "react-icons/bs";
 import './AnnotationForm.css'; // Import the CSS file for styling
 
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
@@ -52,6 +53,9 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
     return (
         <form onSubmit={handleSubmit} className="annotation-form">
             <div className="form-group">
+                {category && <p>Object: {category}</p>}
+            </div>
+            <div className="form-group">
                 <label>
                     Description:
                     <br />
@@ -64,14 +68,17 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
                 </label>
             </div>
             <div className="form-group">
-                <label>
-                    Mesh is malformed:
-                    <input
-                        type="checkbox"
-                        checked={isMalformed}
-                        onChange={(e) => setIsMalformed(e.target.checked)}
-                        disabled={isDisabled}
-                    />
+                <label title="Check if this mesh is broken (missing/transparent faces, no texturing, impossible to tell what it is)">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                        <BsFillInfoCircleFill color="gray" className="info-icon" />
+                        <span>Mesh is malformed:</span>
+                        <input
+                            type="checkbox"
+                            checked={isMalformed}
+                            onChange={(e) => setIsMalformed(e.target.checked)}
+                            disabled={isDisabled}
+                        />
+                    </div>
                 </label>
             </div>
             <button type="submit" disabled={isDisabled} className="submit-button">Submit & Fetch Mesh</button>

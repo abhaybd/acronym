@@ -3,24 +3,35 @@ from pydantic import BaseModel
 import os
 
 import trimesh
-import h5py
+import numpy as np
 
 from acronym_tools import load_mesh, load_grasps, create_gripper_marker
+from annotation import Object, Annotation, MalformedAnnotation
 
 with open("categories.txt", "r") as f:
     CATEGORIES = f.read().splitlines()
 
 annotation_counts: dict[str, dict[str, set[int]]] = {}
+malformed_counts: dict[str, dict[str, set[str]]] = {}
 for c in CATEGORIES:
     annotation_counts[c] = {}
+    malformed_counts[c] = {}
 for fn in os.listdir(f"data/grasps"):
     category, obj_id = fn.split("_", 1)
     obj_id = obj_id[:-len(".h5")]
     if category in annotation_counts:
         annotation_counts[category][obj_id] = set()
+        malformed_counts[category][obj_id] = set()
 
 def num_annotations_category(category: str):
     return sum(map(len, annotation_counts[category].values()))
+
+def choose_from_least(arr, key):
+    if not isinstance(arr, list):
+        arr = list(arr)
+    min_val = min(map(key, arr))
+    min_elem_idxs = [i for i, elem in enumerate(arr) if key(elem) == min_val]
+    return arr[np.random.choice(min_elem_idxs)]
 
 app = FastAPI()
 
@@ -46,18 +57,18 @@ class MalformedMeshSubmission(BaseModel):
 @app.post("/api/get-object-grasp", response_model=MeshResponse)
 async def get_object_grasp():
     category = "Pan"
-    # category = min(CATEGORIES, key=num_annotations_category)
-    import numpy as np
-    category = CATEGORIES[np.random.randint(len(CATEGORIES))]
-    obj_id = np.random.choice(list(annotation_counts[category].keys()))
-    # obj_id = min(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
+    category = choose_from_least(CATEGORIES, num_annotations_category)
+    obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
 
     object_mesh: trimesh.Trimesh = load_mesh(f"data/grasps/{category}_{obj_id}.h5", "data")
+    print("Loaded from:", f"data/grasps/{category}_{obj_id}.h5")
 
     T, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
     successful_grasp_ids = np.argwhere(success == 1).flatten()
     grasp_id = np.random.choice(successful_grasp_ids)
-    gripper_marker = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
+    gripper_marker: trimesh.Trimesh = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
+    gripper_marker.vertices -= object_mesh.centroid
+    object_mesh.vertices -= object_mesh.centroid
 
     scene = trimesh.Scene([object_mesh, gripper_marker])
     geom: trimesh.Trimesh = scene.to_mesh()
@@ -76,14 +87,28 @@ async def get_object_grasp():
 
 @app.post("/api/submit-annotation")
 async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie(...)):
+    total_annotations = sum(map(num_annotations_category, annotation_counts.keys()))
+    print(f"User {user_id} annotated: {request.object_category}_{request.object_id}, grasp {request.grasp_id}. Total annotations: {total_annotations}")
     category = request.object_category
     obj_id = request.object_id
     grasp_id = request.grasp_id
 
     annotation_counts[category][obj_id].add(grasp_id)
-    print(f"User ID: {user_id}")
-    print(request)
+    annotation = Annotation(
+        obj=Object(object_category=category, object_id=obj_id),
+        grasp_id=grasp_id,
+        description=request.description,
+        user_id=user_id
+    )
+    with open("annotations.jsonl", "a+") as f:
+        f.write(f"{annotation.model_dump_json()}\n")
 
 @app.post("/api/submit-malformed")
 async def malformed_mesh(request: MalformedMeshSubmission, user_id: str = Cookie(...)):
-    print(request)
+    print(f"User {user_id} marked as malformed: {request.object_category}_{request.object_id}")
+    annotation = MalformedAnnotation(
+        obj=Object(object_category=request.object_category, object_id=request.object_id),
+        user_id=user_id
+    )
+    with open("malformed.jsonl", "a+") as f:
+        f.write(f"{annotation.model_dump_json()}\n")
