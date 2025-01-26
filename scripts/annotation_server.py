@@ -51,11 +51,15 @@ app = FastAPI()
 class UserRequest(BaseModel):
     username: str
 
-class MeshResponse(BaseModel):
+class ObjectGraspInfo(BaseModel):
     object_category: str
     object_id: str
     grasp_id: int
-    mesh: dict
+
+class MeshData(BaseModel):
+    vertices: list[float]
+    faces: list[int]
+    vertex_colors: list[float]
 
 class AnnotationSubmission(BaseModel):
     object_category: str
@@ -67,16 +71,27 @@ class MalformedMeshSubmission(BaseModel):
     object_category: str
     object_id: str
 
-@app.post("/api/get-object-grasp", response_model=MeshResponse)
+@app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp():
     category = "Pan"
     category = choose_from_least(annotation_counts.keys(), num_annotations_category)
     obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
 
-    object_mesh: trimesh.Trimesh = load_mesh(f"data/grasps/{category}_{obj_id}.h5", "data")
-    T, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
+    _, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
     successful_grasp_ids = np.argwhere(success == 1).flatten()
     grasp_id = np.random.choice(successful_grasp_ids)
+
+    return ObjectGraspInfo(
+        object_category=category,
+        object_id=obj_id,
+        grasp_id=grasp_id
+    )
+
+@app.post("/api/get-mesh-data", response_model=MeshData)
+async def get_mesh_data(request: ObjectGraspInfo):
+    category, obj_id, grasp_id = request.object_category, request.object_id, request.grasp_id
+    object_mesh: trimesh.Trimesh = load_mesh(f"data/grasps/{category}_{obj_id}.h5", "data")
+    T, _ = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
     gripper_marker: trimesh.Trimesh = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
     gripper_marker.vertices -= object_mesh.centroid
     object_mesh.vertices -= object_mesh.centroid
@@ -85,15 +100,10 @@ async def get_object_grasp():
     geom: trimesh.Trimesh = scene.to_mesh()
     visual: trimesh.visual.ColorVisuals = geom.visual
 
-    return MeshResponse(
-        object_category=category,
-        object_id=obj_id,
-        grasp_id=grasp_id,
-        mesh={
-            "vertices": geom.vertices.flatten().tolist(),
-            "faces": geom.faces.flatten().tolist(),
-            "vertex_colors": (visual.vertex_colors[:,:3] / 255).flatten().tolist(),
-        }
+    return MeshData(
+        vertices=geom.vertices.flatten().tolist(),
+        faces=geom.faces.flatten().tolist(),
+        vertex_colors=(visual.vertex_colors[:,:3] / 255).flatten().tolist(),
     )
 
 @app.post("/api/submit-annotation")
