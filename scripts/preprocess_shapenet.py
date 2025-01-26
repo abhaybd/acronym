@@ -14,6 +14,7 @@ def get_args():
     parser.add_argument("shapenet_root")
     parser.add_argument("output_dir")
     parser.add_argument("--n-grasps", type=int, default=16)
+    parser.add_argument("-s", "--seed", type=int, default=42)
     return parser.parse_args()
 
 def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):
@@ -57,6 +58,8 @@ def main():
     output_grasp_dir = os.path.join(args.output_dir, "grasps")
     os.makedirs(output_mesh_dir, exist_ok=True)
     os.makedirs(output_grasp_dir, exist_ok=True)
+
+    np.random.seed(args.seed)
 
     with open(os.path.join(args.shapenet_root, "metadata.csv"), "r") as f:
         n_rows = sum(1 for _ in f)
