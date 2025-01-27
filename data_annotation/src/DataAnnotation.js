@@ -26,7 +26,7 @@ const DataAnnotation = () => {
     navigate({
       pathname: "/",
       search: createSearchParams(data).toString()
-    });
+    }, {replace: true});
   };
 
   useEffect(() => {
@@ -79,9 +79,11 @@ const DataAnnotation = () => {
     );
   };
 
+  const oneshot = searchParams.get('oneshot') === 'true';
+
   return (
     <div className="data-annotation-container">
-      <button onClick={fetchObjectInfo} className="fetch-button" disabled={loading}>
+      <button onClick={fetchObjectInfo} className="fetch-button" disabled={loading} hidden={oneshot}>
         {loading ? 'Loading...' : 'Fetch Mesh'}
       </button>
       <div className="content-container">
@@ -106,6 +108,7 @@ const DataAnnotation = () => {
           object_id={searchParams.get('object_id')}
           grasp_id={searchParams.get('grasp_id')}
           fetchMesh={fetchObjectInfo}
+          oneshot={oneshot}
         />
       </div>
     </div>

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { BsFillInfoCircleFill } from "react-icons/bs";
+import { useNavigate } from 'react-router';
 import './AnnotationForm.css'; // Import the CSS file for styling
 
-const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
+const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) => {
+    const navigate = useNavigate();
     const [description, setDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState(false);
 
@@ -43,9 +45,13 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
             console.error('Error:', error);
             alert('An error occurred while submitting the annotation');
         }
-        setDescription("");
-        setIsMalformed(false);
-        await fetchMesh();
+        if (!oneshot) {
+            setDescription("");
+            setIsMalformed(false);
+            await fetchMesh();
+        } else {
+            navigate('/done', { replace: true });
+        }
     };
 
     const isDisabled = !category || !object_id;
@@ -81,7 +87,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh }) => {
                     </div>
                 </label>
             </div>
-            <button type="submit" disabled={isDisabled} className="submit-button">Submit & Fetch Mesh</button>
+            <button type="submit" disabled={isDisabled} className="submit-button">Submit</button>
         </form>
     );
 };

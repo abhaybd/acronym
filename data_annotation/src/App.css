@@ -20,3 +20,8 @@ body {
     justify-content: center;
     width: 100%;
 }
+
+.done-body {
+    text-align: center;
+    color: #ff69b4;
+}

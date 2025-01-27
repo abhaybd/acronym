@@ -1,8 +1,18 @@
 import React, { useEffect } from 'react';
 import DataAnnotation from './DataAnnotation';
-import './App.css'; // Import the CSS file for styling
 import { useCookies } from 'react-cookie';
 import { v4 as uuidv4 } from 'uuid';
+import { Routes, Route } from 'react-router';
+import './App.css';
+
+function Done() {
+  return (
+    <div className="done-body">
+      <h2>Thank you for your submission!</h2>
+      <p>You can close this tab now.</p>
+    </div>
+  );
+}
 
 function App() {
   const [cookies, setCookie] = useCookies(['user_id']);
@@ -19,7 +29,10 @@ function App() {
         <h1>Grasp Description Annotation</h1>
       </header>
       <main className="App-main">
-        <DataAnnotation />
+        <Routes>
+          <Route path="/" element={<DataAnnotation />} />
+          <Route path="/done" element={<Done />} />
+        </Routes>
       </main>
     </div>
   );
