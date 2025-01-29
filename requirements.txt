@@ -5,3 +5,4 @@ pyrender
 matplotlib
 python-fcl
 shapely
+fastapi[standard]

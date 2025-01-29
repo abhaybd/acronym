@@ -11,6 +11,7 @@ setuptools.setup(
     description="A few scripts to work with the grasp dataset ACRONYM.",
     long_description=long_description,
     long_description_content_type="text/markdown",
+    requires=open("requirements.txt").readlines(),
     url="https://sites.google.com/nvidia.com/graspdataset/",
     packages=['acronym_tools'],
     scripts=[

@@ -8,6 +8,8 @@ import numpy as np
 from acronym_tools import load_mesh, load_grasps, create_gripper_marker
 from annotation import Object, Annotation, MalformedAnnotation
 
+DATA_ROOT = os.environ.get("DATA_ROOT", "data")
+
 with open("categories.txt", "r") as f:
     CATEGORIES = f.read().splitlines()
 
@@ -16,7 +18,7 @@ malformed_counts: dict[str, dict[str, set[str]]] = {}
 for c in CATEGORIES:
     annotation_counts[c] = {}
     malformed_counts[c] = {}
-for fn in os.listdir(f"data/grasps"):
+for fn in os.listdir(f"{DATA_ROOT}/grasps"):
     category, obj_id = fn.split("_", 1)
     obj_id = obj_id[:-len(".h5")]
     if category in annotation_counts:
@@ -77,7 +79,7 @@ async def get_object_grasp():
     category = choose_from_least(annotation_counts.keys(), num_annotations_category)
     obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
 
-    _, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
+    _, success = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5")
     successful_grasp_ids = np.argwhere(success == 1).flatten()
     grasp_id = np.random.choice(successful_grasp_ids)
 
@@ -90,8 +92,8 @@ async def get_object_grasp():
 @app.post("/api/get-mesh-data", response_model=MeshData)
 async def get_mesh_data(request: ObjectGraspInfo):
     category, obj_id, grasp_id = request.object_category, request.object_id, request.grasp_id
-    object_mesh: trimesh.Trimesh = load_mesh(f"data/grasps/{category}_{obj_id}.h5", "data")
-    T, _ = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
+    object_mesh: trimesh.Trimesh = load_mesh(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5", "data")
+    T, _ = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5")
     gripper_marker: trimesh.Trimesh = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
     gripper_marker.vertices -= object_mesh.centroid
     object_mesh.vertices -= object_mesh.centroid
