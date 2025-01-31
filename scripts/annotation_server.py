@@ -12,6 +12,7 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "data")
 
 with open("categories.txt", "r") as f:
     CATEGORIES = f.read().splitlines()
+CATEGORIES = ["Bottle", "Mug", "Pan"] # TODO: remove hardcode
 
 annotation_counts: dict[str, dict[str, set[int]]] = {}
 malformed_counts: dict[str, dict[str, set[str]]] = {}
@@ -75,13 +76,16 @@ class MalformedMeshSubmission(BaseModel):
 
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp():
-    category = "Pan"
     category = choose_from_least(annotation_counts.keys(), num_annotations_category)
-    obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
+    # TODO: remove hardcode
+    # obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
+    obj_id = sorted(annotation_counts[category].keys())[3]
 
-    _, success = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5")
+    print(f"Chose {category}_{obj_id} with {len(annotation_counts[category][obj_id])} annotations")
+
+    _, success = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5", load_subsampled=True)
     successful_grasp_ids = np.argwhere(success == 1).flatten()
-    grasp_id = np.random.choice(successful_grasp_ids)
+    grasp_id = np.random.choice(successful_grasp_ids) # TODO: change to select new grasps
 
     return ObjectGraspInfo(
         object_category=category,

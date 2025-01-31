@@ -401,7 +401,7 @@ def load_mesh(filename, mesh_root_dir, scale=None):
     return obj_mesh
 
 
-def load_grasps(filename):
+def load_grasps(filename, load_subsampled=False):
     """Load transformations and qualities of grasps from a JSON file from the dataset.
 
     Args:
@@ -412,6 +412,7 @@ def load_grasps(filename):
         np.ndarray: List of binary values indicating grasp success in simulation.
     """
     if filename.endswith(".json"):
+        assert not load_subsampled, "Subsampling not supported for JSON files."
         data = json.load(open(filename, "r"))
         T = np.array(data["transforms"])
         success = np.array(data["quality_flex_object_in_gripper"])
@@ -419,6 +420,10 @@ def load_grasps(filename):
         data = h5py.File(filename, "r")
         T = np.array(data["grasps/transforms"])
         success = np.array(data["grasps/qualities/flex/object_in_gripper"])
+        if load_subsampled:
+            idxs = np.array(data["grasps/sampled_idxs"])
+            T = T[idxs]
+            success = success[idxs]
     else:
         raise RuntimeError("Unknown file ending:", filename)
     return T, success

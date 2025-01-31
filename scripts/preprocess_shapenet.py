@@ -7,6 +7,7 @@ import re
 import h5py
 import numpy as np
 from tqdm import tqdm
+from scipy.spatial.transform import Rotation as R
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -15,6 +16,22 @@ def get_args():
     parser.add_argument("output_dir")
     parser.add_argument("--n-grasps", type=int, default=16)
     return parser.parse_args()
+
+def rot_distance(rot_deltas: np.ndarray):
+    return R.from_matrix(rot_deltas).magnitude()
+
+def grasp_dist(grasp: np.ndarray, grasps2: np.ndarray):
+    assert grasp.ndim == 2
+    if grasps2.ndim == 2:
+        grasps2 = grasps2[None]
+    pos_dist = np.linalg.norm(grasp[None, :3, 3] - grasps2[:, :3, 3], axis=1)
+
+    rd1 = rot_distance(grasps2[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3])
+    rd2 = rot_distance(grasps2[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3] @ R.from_euler("z", [np.pi]).as_matrix())
+    rot_dist = np.minimum(rd1, rd2)
+
+    return pos_dist + 0.05 * rot_dist
+
 
 def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):
     succ_grasp_idxs = np.argwhere(successes == 1).flatten()
@@ -32,7 +49,7 @@ def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):
 
     for i in range(1, n):
         last_added_idx = sample_inds[i-1]
-        dists_to_last_added = np.linalg.norm(grasps[last_added_idx] - grasps[points_left], axis=(1, 2))
+        dists_to_last_added = grasp_dist(grasps[last_added_idx], grasps[points_left])
         dists[points_left] = np.minimum(dists[points_left], dists_to_last_added)
         selected = np.argmax(dists[points_left])
         sample_inds[i] = points_left[selected]
@@ -103,10 +120,7 @@ def main():
                     grasps = np.array(f["grasps/transforms"])
                     successes = np.array(f["grasps/qualities/flex/object_in_gripper"])
                     sampled_grasp_idxs = subsample_grasps(successes, grasps, args.n_grasps)
-                    del f["grasps/transforms"]
-                    del f["grasps/qualities/flex/object_in_gripper"]
-                    f["grasps/transforms"] = grasps[sampled_grasp_idxs]
-                    f["grasps/qualities/flex/object_in_gripper"] = successes[sampled_grasp_idxs]
+                    f["grasps/sampled_idxs"] = sampled_grasp_idxs
 
 if __name__ == "__main__":
     main()
