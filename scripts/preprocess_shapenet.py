@@ -61,66 +61,55 @@ def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):
 def main():
     args = get_args()
 
-    object_categories = {}
-    object_datafiles = {}
-    for grasp_filename in tqdm(os.listdir(args.grasps_root), desc="Compiling object categories"):
-        with h5py.File(os.path.join(args.grasps_root, grasp_filename), "r") as f:
-            _, category, mesh_fn = f["object/file"][()].decode("utf-8").split("/")
-            obj_id = mesh_fn.split(".")[0]
-            object_categories[obj_id] = category
-            object_datafiles[obj_id] = grasp_filename
-
     output_mesh_dir = os.path.join(args.output_dir, "meshes")
     output_grasp_dir = os.path.join(args.output_dir, "grasps")
     os.makedirs(output_mesh_dir, exist_ok=True)
     os.makedirs(output_grasp_dir, exist_ok=True)
 
-    with open(os.path.join(args.shapenet_root, "metadata.csv"), "r") as f:
-        n_rows = sum(1 for _ in f)
-        f.seek(0)
-        reader = csv.DictReader(f)
-        for row in tqdm(reader, desc="Copying meshes", total=n_rows):
-            obj_id = row["fullId"].split(".", 1)[1]
-            categories = row["category"]
-            if obj_id in object_categories and object_categories[obj_id] in categories:
-                mesh_src_dir = os.path.join(args.shapenet_root, "models-OBJ", "models")
-                mesh_dst_dir = os.path.join(output_mesh_dir, object_categories[obj_id])
-                os.makedirs(mesh_dst_dir, exist_ok=True)
-                shutil.copy2(
-                    os.path.join(mesh_src_dir, f"{obj_id}.obj"),
-                    os.path.join(mesh_dst_dir, f"{obj_id}.obj")
-                )
+    for grasp_filename in tqdm(os.listdir(args.grasps_root)):
+        category = grasp_filename.split("_", 1)[0]
+        mesh_src_dir = os.path.join(args.shapenet_root, "models-OBJ", "models")
+        mesh_dst_dir = os.path.join(output_mesh_dir, category)
+        os.makedirs(mesh_dst_dir, exist_ok=True)
 
-                texture_files = set()
-                with open(os.path.join(mesh_src_dir, f"{obj_id}.mtl"), "r") as mtl_f:
-                    mtl_lines = []
-                    for line in mtl_f:
-                        line = line.strip()
-                        if m := re.fullmatch(r"d (\d+\.?\d*)", line):
-                            mtl_lines.append(f"d {1-float(m.group(1))}")
-                        elif m := re.fullmatch(r".+ (.+\.jpg)", line):
-                            texture_files.add(m.group(1))
-                            mtl_lines.append(line)
-                        else:
-                            mtl_lines.append(line)
-                with open(os.path.join(mesh_dst_dir, f"{obj_id}.mtl"), "w") as mtl_f:
-                    mtl_f.write("\n".join(mtl_lines))
+        shutil.copy2(
+            os.path.join(args.grasps_root, grasp_filename),
+            os.path.join(output_grasp_dir, grasp_filename)
+        )
+        with h5py.File(os.path.join(output_grasp_dir, grasp_filename), "r+") as f:
+            _, c, mesh_fn = f["object/file"][()].decode("utf-8").split("/")
+            assert c == category
+            obj_id = mesh_fn[:-len(".obj")]
+            grasps = np.array(f["grasps/transforms"])
+            successes = np.array(f["grasps/qualities/flex/object_in_gripper"])
+            sampled_grasp_idxs = subsample_grasps(successes, grasps, args.n_grasps)
+            f["grasps/sampled_idxs"] = sampled_grasp_idxs
+        
+        shutil.copy2(
+            os.path.join(mesh_src_dir, f"{obj_id}.obj"),
+            os.path.join(mesh_dst_dir, f"{obj_id}.obj")
+        )
 
-                for texture_file in texture_files:
-                    shutil.copy2(
-                        os.path.join(args.shapenet_root, "models-textures", "textures", texture_file),
-                        os.path.join(mesh_dst_dir, texture_file)
-                    )
+        texture_files = set()
+        with open(os.path.join(mesh_src_dir, f"{obj_id}.mtl"), "r") as mtl_f:
+            mtl_lines = []
+            for line in mtl_f:
+                line = line.strip()
+                if m := re.fullmatch(r"d (\d+\.?\d*)", line):
+                    mtl_lines.append(f"d {1-float(m.group(1))}")
+                elif m := re.fullmatch(r".+ (.+\.jpg)", line):
+                    texture_files.add(m.group(1))
+                    mtl_lines.append(line)
+                else:
+                    mtl_lines.append(line)
+        with open(os.path.join(mesh_dst_dir, f"{obj_id}.mtl"), "w") as mtl_f:
+            mtl_f.write("\n".join(mtl_lines))
 
-                shutil.copy2(
-                    os.path.join(args.grasps_root, object_datafiles[obj_id]),
-                    os.path.join(output_grasp_dir, object_datafiles[obj_id])
-                )
-                with h5py.File(os.path.join(output_grasp_dir, object_datafiles[obj_id]), "r+") as f:
-                    grasps = np.array(f["grasps/transforms"])
-                    successes = np.array(f["grasps/qualities/flex/object_in_gripper"])
-                    sampled_grasp_idxs = subsample_grasps(successes, grasps, args.n_grasps)
-                    f["grasps/sampled_idxs"] = sampled_grasp_idxs
+        for texture_file in texture_files:
+            shutil.copy2(
+                os.path.join(args.shapenet_root, "models-textures", "textures", texture_file),
+                os.path.join(mesh_dst_dir, texture_file)
+            )
 
 if __name__ == "__main__":
     main()
