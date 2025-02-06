@@ -34,9 +34,10 @@ for fn in os.listdir(f"{DATA_ROOT}/grasps"):
             idxs = np.array(f["grasps/sampled_idxs"])
             succs = np.array(f["grasps/qualities/flex/object_in_gripper"], dtype=bool)[idxs]
             idxs = idxs[succs]
-        if category not in annotated_grasps:
-            annotated_grasps[category] = {}
-        annotated_grasps[category][obj_id] = {i: False for i in idxs}
+        if len(idxs) > 0:
+            if category not in annotated_grasps:
+                annotated_grasps[category] = {}
+            annotated_grasps[category][obj_id] = {i: False for i in idxs}
 
 def remove_grasp(category, obj_id, grasp_id):
     if category in annotated_grasps and obj_id in annotated_grasps[category] and grasp_id in annotated_grasps[category][obj_id]:
@@ -73,15 +74,27 @@ def num_annotations_category(category: str):
         n_annotations += sum(grasps.values())
     return n_annotations
 
+def num_unannotated_category(category: str):
+    n_unannotated = 0
+    for grasps in annotated_grasps[category].values():
+        n_unannotated += sum(1 for annotated in grasps.values() if not annotated)
+    return n_unannotated
+
 def num_annotations(category: str, obj_id: str):
     return sum(annotated_grasps[category][obj_id].values())
 
-def choose_from_least(arr, key):
+def num_unannotated(category: str, obj_id: str):
+    return sum(1 for annotated in annotated_grasps[category][obj_id].values() if not annotated)
+
+def sample_choice(arr, key):
     if not isinstance(arr, list):
         arr = list(arr)
-    min_val = min(map(key, arr))
-    min_elem_idxs = [i for i, elem in enumerate(arr) if key(elem) == min_val]
-    return arr[np.random.choice(min_elem_idxs)]
+    weights = np.array([key(elem) for elem in arr])
+    assert np.all(weights >= 0)
+    if np.all(weights == 0):
+        return None
+    idx = np.random.choice(len(arr), p=weights/weights.sum())
+    return arr[idx]
 
 app = FastAPI()
 
@@ -111,14 +124,13 @@ class MalformedMeshSubmission(BaseModel):
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp(response: Response):
     async with annotation_lock:
-        category = choose_from_least(annotated_grasps.keys(), num_annotations_category)
-        obj_id = choose_from_least(annotated_grasps[category], key=lambda oid: num_annotations(category, oid))
+        category = sample_choice(annotated_grasps.keys(), num_unannotated_category)
+        if category is None:
+            print("All grasps annotated!")
+            response.status_code = 204
+            return ObjectGraspInfo(object_category="", object_id="", grasp_id=-1)
+        obj_id = sample_choice(annotated_grasps[category], key=lambda oid: num_unannotated(category, oid))
         unannotated_grasps = [grasp_id for grasp_id, annotated in annotated_grasps[category][obj_id].items() if not annotated]
-
-    if len(unannotated_grasps) == 0:
-        print("All grasps annotated!")
-        response.status_code = 204
-        return ObjectGraspInfo(object_category="", object_id="", grasp_id=-1)
 
     grasp_id = np.random.choice(unannotated_grasps)
     print(f"Chose {category}_{obj_id} with {num_annotations(category, obj_id)} annotations")
