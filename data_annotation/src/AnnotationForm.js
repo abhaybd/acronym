@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { BsFillInfoCircleFill } from "react-icons/bs";
 import { useNavigate } from 'react-router';
-import './AnnotationForm.css'; // Import the CSS file for styling
+import './AnnotationForm.css';
 
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) => {
     const navigate = useNavigate();
     const [description, setDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState(false);
+    const [isInvalidGrasp, setIsInvalidGrasp] = useState(false);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -16,6 +17,13 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
             data = {
                 "object_category": category,
                 "object_id": object_id
+            };
+        } else if (isInvalidGrasp) {
+            endpoint = "/api/submit-invalid-grasp";
+            data = {
+                "object_category": category,
+                "object_id": object_id,
+                "grasp_id": grasp_id
             };
         } else {
             endpoint = "/api/submit-annotation";
@@ -48,6 +56,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
         if (!oneshot) {
             setDescription("");
             setIsMalformed(false);
+            setIsInvalidGrasp(false);
             await fetchMesh();
         } else {
             navigate('/done', { replace: true });
@@ -66,9 +75,9 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                     Description:
                     <br />
                     <textarea
-                        value={isMalformed ? "" : description}
+                        value={isMalformed || isInvalidGrasp ? "" : description}
                         onChange={(e) => setDescription(e.target.value)}
-                        disabled={isMalformed || isDisabled}
+                        disabled={isMalformed || isDisabled || isInvalidGrasp}
                         required={!isMalformed && !isDisabled}
                     />
                 </label>
@@ -83,6 +92,20 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                             checked={isMalformed}
                             onChange={(e) => setIsMalformed(e.target.checked)}
                             disabled={isDisabled}
+                        />
+                    </div>
+                </label>
+            </div>
+            <div className="form-group">
+                <label title="Check if this grasp is bad (not firmly on the object, not grasping a solid part, etc)">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                        <BsFillInfoCircleFill color="gray" className="info-icon" />
+                        <span>Invalid grasp:</span>
+                        <input
+                            type="checkbox"
+                            checked={isInvalidGrasp && !isMalformed}
+                            onChange={(e) => setIsInvalidGrasp(e.target.checked)}
+                            disabled={isMalformed || isDisabled}
                         />
                     </div>
                 </label>

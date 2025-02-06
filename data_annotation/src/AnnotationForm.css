@@ -49,3 +49,8 @@ input[type="checkbox"] {
 .submit-button:hover {
     background-color: #ff1493; /* darker pink */
 }
+
+.submit-button:disabled {
+    background-color: #ffb6c1; /* light pink */
+    cursor: not-allowed;
+}

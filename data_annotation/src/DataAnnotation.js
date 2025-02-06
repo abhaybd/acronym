@@ -18,15 +18,20 @@ const DataAnnotation = () => {
       method: 'POST'
     });
     if (!response.ok) {
-      console.error(`Failed to fetch object info: HTTP ${response.status}`);
+      alert(`Failed to fetch object info: HTTP ${response.status}`);
+      const errorMessage = await response.text();
+      console.error(errorMessage);
       setLoading(false);
-      return;
+    } else if (response.status === 204) {
+      alert("No more objects to annotate!");
+      navigate('/done', { replace: true });
+    } else {
+      const data = await response.json();
+      navigate({
+        pathname: "/",
+        search: createSearchParams(data).toString()
+      }, {replace: true});
     }
-    const data = await response.json();
-    navigate({
-      pathname: "/",
-      search: createSearchParams(data).toString()
-    }, {replace: true});
   };
 
   useEffect(() => {
@@ -54,8 +59,14 @@ const DataAnnotation = () => {
           grasp_id: grasp_id
         }),
       });
-      const data = await response.json();
-      setMeshData(data);
+      if (!response.ok) {
+        alert(`Failed to submit annotation: HTTP ${response.status}`);
+        const errorMessage = await response.text();
+        console.error(errorMessage);
+      } else {
+        const data = await response.json();
+        setMeshData(data);
+      }
     } catch (error) {
       console.error('Error fetching mesh data:', error);
     } finally {

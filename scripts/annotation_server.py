@@ -1,46 +1,80 @@
-from fastapi import FastAPI, Cookie
+from fastapi import FastAPI, Cookie, Response
 from pydantic import BaseModel
 import os
+import asyncio
 
+import h5py
 import trimesh
 import numpy as np
 
 from acronym_tools import load_mesh, load_grasps, create_gripper_marker
-from annotation import Object, Annotation, MalformedAnnotation
+from annotation import Object, Annotation, MalformedAnnotation, InvalidGraspAnnotation
 
 DATA_ROOT = os.environ.get("DATA_ROOT", "data")
+ANNOTATIONS_ROOT = "annotations"
+ANNOTATION_PATH = f"{ANNOTATIONS_ROOT}/annotations.jsonl"
+MALFORMED_PATH = f"{ANNOTATIONS_ROOT}/malformed.jsonl"
+INVALID_GRASPS_PATH = f"{ANNOTATIONS_ROOT}/invalid_grasps.jsonl"
 
 with open("categories.txt", "r") as f:
-    CATEGORIES = f.read().splitlines()
-CATEGORIES = ["Bottle", "Mug", "Pan"] # TODO: remove hardcode
+    CATEGORIES = set(f.read().splitlines())
 
-annotation_counts: dict[str, dict[str, set[int]]] = {}
-malformed_counts: dict[str, dict[str, set[str]]] = {}
-for c in CATEGORIES:
-    annotation_counts[c] = {}
-    malformed_counts[c] = {}
+# maps (category, object_id, grasp_id) -> whether the grasp is annotated
+annotated_grasps: dict[str, dict[str, dict[int, bool]]] = {}
+annotation_lock = asyncio.Lock()
+annotation_file_lock = asyncio.Lock()
+malformed_file_lock = asyncio.Lock()
+invalid_grasp_file_lock = asyncio.Lock()
+
 for fn in os.listdir(f"{DATA_ROOT}/grasps"):
     category, obj_id = fn.split("_", 1)
     obj_id = obj_id[:-len(".h5")]
-    if category in annotation_counts:
-        annotation_counts[category][obj_id] = set()
-        malformed_counts[category][obj_id] = set()
+    if category in CATEGORIES:
+        with h5py.File(f"{DATA_ROOT}/grasps/{fn}", "r") as f:
+            idxs = np.array(f["grasps/sampled_idxs"])
+            succs = np.array(f["grasps/qualities/flex/object_in_gripper"], dtype=bool)[idxs]
+            idxs = idxs[succs]
+        if category not in annotated_grasps:
+            annotated_grasps[category] = {}
+        annotated_grasps[category][obj_id] = {i: False for i in idxs}
 
-if os.path.isfile("annotations.jsonl"):
-    with open("annotations.jsonl", "r") as f:
+def remove_grasp(category, obj_id, grasp_id):
+    if category in annotated_grasps and obj_id in annotated_grasps[category] and grasp_id in annotated_grasps[category][obj_id]:
+        del annotated_grasps[category][obj_id][grasp_id]
+        if len(annotated_grasps[category][obj_id]) == 0:
+            remove_object(category, obj_id)
+
+def remove_object(category, obj_id):
+    if obj_id in annotated_grasps[category]:
+        del annotated_grasps[category][obj_id]
+        if len(annotated_grasps[category]) == 0:
+            del annotated_grasps[category]
+
+os.makedirs(ANNOTATIONS_ROOT, exist_ok=True)
+if os.path.isfile(ANNOTATION_PATH):
+    with open(ANNOTATION_PATH, "r") as f:
         for line in f:
             annotation = Annotation.model_validate_json(line)
-            annotation_counts[annotation.obj.object_category][annotation.obj.object_id].add(annotation.grasp_id)
-if os.path.isfile("malformed.jsonl"):
-    with open("malformed.jsonl", "r") as f:
+            annotated_grasps[annotation.obj.object_category][annotation.obj.object_id][annotation.grasp_id] = True
+if os.path.isfile(MALFORMED_PATH):
+    with open(MALFORMED_PATH, "r") as f:
         for line in f:
             annotation = MalformedAnnotation.model_validate_json(line)
-            malformed_counts[annotation.obj.object_category][annotation.obj.object_id].add(annotation.user_id)
-            if annotation.obj.object_id in annotation_counts[annotation.obj.object_category]:
-                del annotation_counts[annotation.obj.object_category][annotation.obj.object_id]
+            remove_object(annotation.obj.object_category, annotation.obj.object_id)
+if os.path.isfile(INVALID_GRASPS_PATH):
+    with open(INVALID_GRASPS_PATH, "r") as f:
+        for line in f:
+            annotation = InvalidGraspAnnotation.model_validate_json(line)
+            remove_grasp(annotation.obj.object_category, annotation.obj.object_id, annotation.grasp_id)
 
 def num_annotations_category(category: str):
-    return sum(map(len, annotation_counts[category].values()))
+    n_annotations = 0
+    for grasps in annotated_grasps[category].values():
+        n_annotations += sum(grasps.values())
+    return n_annotations
+
+def num_annotations(category: str, obj_id: str):
+    return sum(annotated_grasps[category][obj_id].values())
 
 def choose_from_least(arr, key):
     if not isinstance(arr, list):
@@ -75,17 +109,19 @@ class MalformedMeshSubmission(BaseModel):
     object_id: str
 
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
-async def get_object_grasp():
-    category = choose_from_least(annotation_counts.keys(), num_annotations_category)
-    # TODO: remove hardcode
-    # obj_id = choose_from_least(annotation_counts[category], key=lambda oid: len(annotation_counts[category][oid]))
-    obj_id = sorted(annotation_counts[category].keys())[3]
+async def get_object_grasp(response: Response):
+    async with annotation_lock:
+        category = choose_from_least(annotated_grasps.keys(), num_annotations_category)
+        obj_id = choose_from_least(annotated_grasps[category], key=lambda oid: num_annotations(category, oid))
+        unannotated_grasps = [grasp_id for grasp_id, annotated in annotated_grasps[category][obj_id].items() if not annotated]
 
-    print(f"Chose {category}_{obj_id} with {len(annotation_counts[category][obj_id])} annotations")
+    if len(unannotated_grasps) == 0:
+        print("All grasps annotated!")
+        response.status_code = 204
+        return ObjectGraspInfo(object_category="", object_id="", grasp_id=-1)
 
-    _, success = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5", load_subsampled=True)
-    successful_grasp_ids = np.argwhere(success == 1).flatten()
-    grasp_id = np.random.choice(successful_grasp_ids) # TODO: change to select new grasps
+    grasp_id = np.random.choice(unannotated_grasps)
+    print(f"Chose {category}_{obj_id} with {num_annotations(category, obj_id)} annotations")
 
     return ObjectGraspInfo(
         object_category=category,
@@ -114,21 +150,23 @@ async def get_mesh_data(request: ObjectGraspInfo):
 
 @app.post("/api/submit-annotation")
 async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie(...)):
-    total_annotations = sum(map(num_annotations_category, annotation_counts.keys()))
+    async with annotation_lock:
+        total_annotations = sum(map(num_annotations_category, annotated_grasps.keys()))
     print(f"User {user_id} annotated: {request.object_category}_{request.object_id}, grasp {request.grasp_id}. Total annotations: {total_annotations+1}")
     category = request.object_category
     obj_id = request.object_id
     grasp_id = request.grasp_id
 
-    annotation_counts[category][obj_id].add(grasp_id)
+    annotated_grasps[category][obj_id][grasp_id] = True
     annotation = Annotation(
         obj=Object(object_category=category, object_id=obj_id),
         grasp_id=grasp_id,
         description=request.description,
         user_id=user_id
     )
-    with open("annotations.jsonl", "a+") as f:
-        f.write(f"{annotation.model_dump_json()}\n")
+    async with annotation_file_lock:
+        with open(ANNOTATION_PATH, "a+") as f:
+            f.write(f"{annotation.model_dump_json()}\n")
 
 @app.post("/api/submit-malformed")
 async def malformed_mesh(request: MalformedMeshSubmission, user_id: str = Cookie(...)):
@@ -137,7 +175,25 @@ async def malformed_mesh(request: MalformedMeshSubmission, user_id: str = Cookie
         obj=Object(object_category=request.object_category, object_id=request.object_id),
         user_id=user_id
     )
-    if request.object_id in annotation_counts[request.object_category]:
-        del annotation_counts[request.object_category][request.object_id]
-    with open("malformed.jsonl", "a+") as f:
-        f.write(f"{annotation.model_dump_json()}\n")
+    async with annotation_lock:
+        remove_object(request.object_category, request.object_id)
+    async with malformed_file_lock:
+        with open(MALFORMED_PATH, "a+") as f:
+            f.write(f"{annotation.model_dump_json()}\n")
+
+@app.post("/api/submit-invalid-grasp")
+async def invalid_grasp(request: ObjectGraspInfo, user_id: str = Cookie(...)):
+    category = request.object_category
+    obj_id = request.object_id
+    grasp_id = request.grasp_id
+    print(f"User {user_id} marked as invalid grasp: {category}_{obj_id}, grasp {grasp_id}")
+    annotation = InvalidGraspAnnotation(
+        obj=Object(object_category=category, object_id=obj_id),
+        grasp_id=grasp_id,
+        user_id=user_id
+    )
+    async with annotation_lock:
+        remove_grasp(category, obj_id, grasp_id)
+    async with invalid_grasp_file_lock:
+        with open(INVALID_GRASPS_PATH, "a+") as f:
+            f.write(f"{annotation.model_dump_json()}\n")
