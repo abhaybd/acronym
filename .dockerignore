@@ -1,0 +1,4 @@
+data
+annotations
+**/*.egg-info
+.git
