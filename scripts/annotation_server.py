@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Cookie, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
 import asyncio
@@ -209,3 +210,5 @@ async def invalid_grasp(request: ObjectGraspInfo, user_id: str = Cookie(...)):
     async with invalid_grasp_file_lock:
         with open(INVALID_GRASPS_PATH, "a+") as f:
             f.write(f"{annotation.model_dump_json()}\n")
+
+app.mount("/", StaticFiles(directory="data_annotation/build", html=True), name="static")
