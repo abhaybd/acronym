@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import AnnotationForm from './AnnotationForm';
 import { createSearchParams, useNavigate, useSearchParams } from 'react-router';
+import AnnotationForm from './AnnotationForm';
+import Tutorial from './Tutorial';
 import './DataAnnotation.css';
 
 const DataAnnotation = () => {
@@ -10,6 +11,15 @@ const DataAnnotation = () => {
   const [searchParams] = useSearchParams();
   const [meshData, setMeshData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('hasSeenTutorial');
+    if (!hasSeenTutorial) {
+      setShowTutorial(true);
+      localStorage.setItem('hasSeenTutorial', 'true');
+    }
+  }, []);
 
   const fetchObjectInfo = async () => {
     setLoading(true);
@@ -94,10 +104,13 @@ const DataAnnotation = () => {
 
   return (
     <div className="data-annotation-container">
-      <button onClick={fetchObjectInfo} className="fetch-button" disabled={loading} hidden={oneshot}>
-        {loading ? 'Loading...' : 'Fetch Mesh'}
-      </button>
-      <div className="content-container">
+      <div className="button-container">
+        <button onClick={fetchObjectInfo} className="fetch-button" disabled={loading} hidden={oneshot}>
+          {loading ? 'Loading...' : 'Fetch Mesh'}
+        </button>
+        <button onClick={() => setShowTutorial(true)} className="tutorial-button">Show Tutorial</button>
+      </div>
+      <div className={`content-container ${showTutorial ? 'dimmed' : ''}`}>
         <div className="canvas-container">
           {loading && <div className="spinner"></div>}
           {meshData && (
@@ -122,6 +135,7 @@ const DataAnnotation = () => {
           oneshot={oneshot}
         />
       </div>
+      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
     </div>
   );
 };

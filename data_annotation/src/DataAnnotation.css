@@ -7,7 +7,13 @@
     justify-content: center;
 }
 
-.fetch-button {
+.button-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.fetch-button, .tutorial-button {
     background-color: #ff69b4; /* pink */
     color: white;
     padding: 10px 20px;
@@ -15,10 +21,9 @@
     border-radius: 20px;
     cursor: pointer;
     transition: background-color 0.3s ease;
-    margin-bottom: 20px;
 }
 
-.fetch-button:hover {
+.fetch-button:hover, .tutorial-button:hover {
     background-color: #ff1493; /* darker pink */
 }
 
