@@ -1,9 +1,9 @@
-import setuptools
+from setuptools import setup, find_packages
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-setuptools.setup(
+setup(
     name="acronym_tools",
     version="0.0.1",
     author="Clemens Eppner, Arsalan Mousavian",
@@ -11,14 +11,9 @@ setuptools.setup(
     description="A few scripts to work with the grasp dataset ACRONYM.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    requires=open("requirements.txt").readlines(),
+    install_requires=open("requirements.txt").read().splitlines(),
     url="https://sites.google.com/nvidia.com/graspdataset/",
-    packages=['acronym_tools'],
-    scripts=[
-        'scripts/acronym_generate_scene.py',
-        'scripts/acronym_render_observations.py',
-        'scripts/acronym_visualize_grasps.py',
-    ],
+    packages=find_packages(include=['acronym_tools', 'acronym_tools.*']),
     package_data={'acronym_tools': ['data/franka_gripper_collision_mesh.stl']},
     classifiers=[
         "Programming Language :: Python :: 3",

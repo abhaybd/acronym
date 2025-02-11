@@ -1,4 +1,5 @@
 data
+!data/annotation_skeleton.pkl
 annotations
 **/*.egg-info
 .git
