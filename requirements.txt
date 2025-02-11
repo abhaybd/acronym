@@ -7,3 +7,5 @@ python-fcl
 shapely
 fastapi[standard]
 open3d
+boto3
+types-boto3[s3]
