@@ -38,9 +38,11 @@ COPY --from=build /app/data_annotation/build ./data_annotation/build
 
 # Copy the rest of the application code
 COPY . .
+RUN mkdir -p annotations
+RUN chmod -R a+rw annotations
 
 # Expose the port the app runs on
-EXPOSE 8000
+EXPOSE 8080
 
 # Run the application
-CMD ["fastapi", "run", "scripts/annotation_server.py", "--port", "80"]
+CMD ["fastapi", "run", "scripts/annotation_server.py", "--port", "8080"]

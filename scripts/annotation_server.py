@@ -69,6 +69,11 @@ if os.path.isfile(INVALID_GRASPS_PATH):
             annotation = InvalidGraspAnnotation.model_validate_json(line)
             remove_grasp(annotation.obj.object_category, annotation.obj.object_id, annotation.grasp_id)
 
+if len(annotated_grasps) == 0:
+    print("No grasps available to annotate!")
+    import sys
+    sys.exit(0)
+
 def num_annotations_category(category: str):
     n_annotations = 0
     for grasps in annotated_grasps[category].values():
