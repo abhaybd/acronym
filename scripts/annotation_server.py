@@ -17,7 +17,7 @@ from acronym_tools import create_gripper_marker
 from annotation import Object, Annotation
 
 
-BUCKET_NAME = os.environ.get("BUCKET_NAME", "prior-datasets")
+BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
 ANNOTATION_PREFIX = "semantic-grasping/annotations/"
 
@@ -32,11 +32,10 @@ annotation_lock = asyncio.Lock()
 with open("data/annotation_skeleton.pkl", "rb") as f:
     skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(f)
     for category, objs in skeleton.items():
-        if category in CATEGORIES:
-            annotated_grasps[category] = {}
-            for obj_id, grasps in objs.items():
-                if len(grasps) > 0:
-                    annotated_grasps[category][obj_id] = grasps
+        annotated_grasps[category] = {}
+        for obj_id, grasps in objs.items():
+            if len(grasps) > 0:
+                annotated_grasps[category][obj_id] = grasps
 
 print("Loading existing annotations...")
 s3 = boto3.client("s3")
@@ -147,7 +146,7 @@ class AnnotationSubmission(BaseModel):
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp(response: Response):
     async with annotation_lock:
-        category = sample_choice(annotated_grasps.keys(), num_unannotated_category)
+        category = sample_choice(CATEGORIES, num_unannotated_category)
         if category is None:
             print("All grasps annotated!")
             response.status_code = 204
