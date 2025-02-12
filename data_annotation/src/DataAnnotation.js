@@ -75,7 +75,7 @@ const DataAnnotation = () => {
     );
   };
 
-  const oneshot = searchParams.get('oneshot') === 'true';
+  const oneshot = searchParams.get('oneshot') === 'true' || searchParams.has("prolific_code");
 
   return (
     <div className="data-annotation-container">
@@ -106,6 +106,7 @@ const DataAnnotation = () => {
           grasp_id={searchParams.get('grasp_id')}
           fetchMesh={fetchObjectInfo}
           oneshot={oneshot}
+          prolific_code={searchParams.get('prolific_code')}
         />
       </div>
       {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}

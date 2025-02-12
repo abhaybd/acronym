@@ -3,7 +3,7 @@ import { BsFillInfoCircleFill } from "react-icons/bs";
 import { useNavigate } from 'react-router';
 import './AnnotationForm.css';
 
-const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) => {
+const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, prolific_code }) => {
     const navigate = useNavigate();
     const [description, setDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState(false);
@@ -44,6 +44,8 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
             setIsMalformed(false);
             setIsInvalidGrasp(false);
             await fetchMesh();
+        } else if (prolific_code) {
+            window.location.href = `https://app.prolific.com/submissions/complete?cc=${prolific_code}`;
         } else {
             navigate('/done', { replace: true });
         }
