@@ -8,13 +8,6 @@ class Annotation(BaseModel, frozen=True):
     obj: Object
     grasp_id: int
     description: str
-    user_id: str
-
-class MalformedAnnotation(BaseModel, frozen=True):
-    obj: Object
-    user_id: str
-
-class InvalidGraspAnnotation(BaseModel, frozen=True):
-    obj: Object
-    grasp_id: int
+    is_mesh_malformed: bool = False
+    is_grasp_invalid: bool = False
     user_id: str

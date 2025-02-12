@@ -107,6 +107,8 @@ def main():
                 line = line.strip()
                 if m := re.fullmatch(r"d (\d+\.?\d*)", line):
                     mtl_lines.append(f"d {1-float(m.group(1))}")
+                elif m := re.fullmatch(r"Kd 0(?:.0)? 0(?:.0)? 0(?:.0)?", line):
+                    mtl_lines.append("Kd 1 1 1")
                 elif m := re.fullmatch(r".+ (.+\.jpg)", line):
                     texture_files.add(m.group(1))
                     mtl_lines.append(line)

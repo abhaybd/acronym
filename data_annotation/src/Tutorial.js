@@ -18,7 +18,7 @@ const Tutorial = ({ onClose }) => {
               This is a data annotation tool for semantic grasping.
               When given a 3D object and a grasp, users should describe that grasp relative to the object.
               The mesh may be broken or malformed, or the displayed grasp could be invalid.
-              In these cases, users should check the corresponding checkboxes instead of describing the grasp.
+              In these cases, users should check the corresponding checkboxes, but still provide a best-effort grasp description.
           </p>
 
           <h3>Grasp Description</h3>

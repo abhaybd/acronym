@@ -358,8 +358,9 @@ def bake_texture(mesh: trimesh.Trimesh):
     if isinstance(mesh.visual, trimesh.visual.color.ColorVisuals):
         return mesh
     elif isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals):
-        mesh.visual.material.image = Image.fromarray(np.reshape(mesh.visual.material.main_color, (1, 1, -1)))
-        mesh.visual.uv = np.zeros((mesh.vertices.shape[0], 2))
+        if mesh.visual.material.image is None:
+            mesh.visual.material.image = Image.fromarray(np.reshape(mesh.visual.material.main_color, (1, 1, -1)))
+            mesh.visual.uv = np.zeros((mesh.vertices.shape[0], 2))
         mesh.visual = mesh.visual.to_color()
         return mesh
     else:

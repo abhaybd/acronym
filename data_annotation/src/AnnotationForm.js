@@ -11,29 +11,15 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        let data, endpoint;
-        if (isMalformed) {
-            endpoint = "/api/submit-malformed";
-            data = {
-                "object_category": category,
-                "object_id": object_id
-            };
-        } else if (isInvalidGrasp) {
-            endpoint = "/api/submit-invalid-grasp";
-            data = {
-                "object_category": category,
-                "object_id": object_id,
-                "grasp_id": grasp_id
-            };
-        } else {
-            endpoint = "/api/submit-annotation";
-            data = {
-                "object_category": category,
-                "object_id": object_id,
-                "grasp_id": grasp_id,
-                "description": description
-            };
-        }
+        let endpoint = "/api/submit-annotation";
+        let data = {
+            "object_category": category,
+            "object_id": object_id,
+            "grasp_id": grasp_id,
+            "description": description,
+            "is_mesh_malformed": isMalformed,
+            "is_grasp_invalid": isInvalidGrasp
+        };
 
         try {
             const response = await fetch(endpoint, {
@@ -63,7 +49,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
         }
     };
 
-    const isDisabled = !category || !object_id;
+    const isDisabled = !category || !object_id || grasp_id == null;
 
     return (
         <form onSubmit={handleSubmit} className="annotation-form">
@@ -77,8 +63,8 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                     <textarea
                         value={isMalformed || isInvalidGrasp ? "" : description}
                         onChange={(e) => setDescription(e.target.value)}
-                        disabled={isMalformed || isDisabled || isInvalidGrasp}
-                        required={!isMalformed && !isDisabled}
+                        disabled={isDisabled}
+                        required={true}
                     />
                 </label>
             </div>
@@ -105,7 +91,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                             type="checkbox"
                             checked={isInvalidGrasp && !isMalformed}
                             onChange={(e) => setIsInvalidGrasp(e.target.checked)}
-                            disabled={isMalformed || isDisabled}
+                            disabled={isDisabled}
                         />
                     </div>
                 </label>

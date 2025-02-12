@@ -3,19 +3,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
 import asyncio
+from tempfile import TemporaryDirectory
+import io
 
 import h5py
 import trimesh
 import numpy as np
+import pickle
+import boto3
+import re
 
-from acronym_tools import load_mesh, load_grasps, create_gripper_marker
-from annotation import Object, Annotation, MalformedAnnotation, InvalidGraspAnnotation
+from acronym_tools import create_gripper_marker
+from annotation import Object, Annotation
 
-DATA_ROOT = os.environ.get("DATA_ROOT", "data")
-ANNOTATIONS_ROOT = "annotations"
-ANNOTATION_PATH = f"{ANNOTATIONS_ROOT}/annotations.jsonl"
-MALFORMED_PATH = f"{ANNOTATIONS_ROOT}/malformed.jsonl"
-INVALID_GRASPS_PATH = f"{ANNOTATIONS_ROOT}/invalid_grasps.jsonl"
+
+BUCKET_NAME = os.environ.get("BUCKET_NAME", "prior-datasets")
+DATA_PREFIX = "semantic-grasping/acronym/"
+ANNOTATION_PREFIX = "semantic-grasping/annotations/"
 
 with open("categories.txt", "r") as f:
     CATEGORIES = set(f.read().splitlines())
@@ -23,56 +27,44 @@ with open("categories.txt", "r") as f:
 # maps (category, object_id, grasp_id) -> whether the grasp is annotated
 annotated_grasps: dict[str, dict[str, dict[int, bool]]] = {}
 annotation_lock = asyncio.Lock()
-annotation_file_lock = asyncio.Lock()
-malformed_file_lock = asyncio.Lock()
-invalid_grasp_file_lock = asyncio.Lock()
 
-for fn in os.listdir(f"{DATA_ROOT}/grasps"):
-    category, obj_id = fn.split("_", 1)
-    obj_id = obj_id[:-len(".h5")]
-    if category in CATEGORIES:
-        with h5py.File(f"{DATA_ROOT}/grasps/{fn}", "r") as f:
-            idxs = np.array(f["grasps/sampled_idxs"])
-            succs = np.array(f["grasps/qualities/flex/object_in_gripper"], dtype=bool)[idxs]
-            idxs = idxs[succs]
-        if len(idxs) > 0:
-            if category not in annotated_grasps:
-                annotated_grasps[category] = {}
-            annotated_grasps[category][obj_id] = {i: False for i in idxs}
+# load annotation skeleton
+with open("data/annotation_skeleton.pkl", "rb") as f:
+    skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(f)
+    for category, objs in skeleton.items():
+        if category in CATEGORIES:
+            annotated_grasps[category] = {}
+            for obj_id, grasps in objs.items():
+                if len(grasps) > 0:
+                    annotated_grasps[category][obj_id] = grasps
 
-def remove_grasp(category, obj_id, grasp_id):
-    if category in annotated_grasps and obj_id in annotated_grasps[category] and grasp_id in annotated_grasps[category][obj_id]:
-        del annotated_grasps[category][obj_id][grasp_id]
-        if len(annotated_grasps[category][obj_id]) == 0:
-            remove_object(category, obj_id)
+print("Loading existing annotations...")
+s3 = boto3.client("s3")
+continuation_token = None
+while True:
+    list_kwargs = {"Bucket": BUCKET_NAME, "Prefix": ANNOTATION_PREFIX}
+    if continuation_token:
+        list_kwargs["ContinuationToken"] = continuation_token
+    response = s3.list_objects_v2(**list_kwargs)
 
-def remove_object(category, obj_id):
-    if obj_id in annotated_grasps[category]:
-        del annotated_grasps[category][obj_id]
-        if len(annotated_grasps[category]) == 0:
-            del annotated_grasps[category]
+    if "Contents" in response:
+        for obj in response["Contents"]:
+            key = obj["Key"]
+            if key.endswith(".json"):
+                filename = os.path.basename(key)[:-len(".json")]
+                object_category, object_id, grasp_id, _ = filename.split("__")
+                grasp_id = int(grasp_id)
+                if object_category in annotated_grasps and \
+                    object_id in annotated_grasps[object_category] and \
+                    grasp_id in annotated_grasps[object_category][object_id]:
+                    annotated_grasps[object_category][object_id][grasp_id] = True
 
-os.makedirs(ANNOTATIONS_ROOT, exist_ok=True)
-if os.path.isfile(ANNOTATION_PATH):
-    with open(ANNOTATION_PATH, "r") as f:
-        for line in f:
-            annotation = Annotation.model_validate_json(line)
-            annotated_grasps[annotation.obj.object_category][annotation.obj.object_id][annotation.grasp_id] = True
-if os.path.isfile(MALFORMED_PATH):
-    with open(MALFORMED_PATH, "r") as f:
-        for line in f:
-            annotation = MalformedAnnotation.model_validate_json(line)
-            remove_object(annotation.obj.object_category, annotation.obj.object_id)
-if os.path.isfile(INVALID_GRASPS_PATH):
-    with open(INVALID_GRASPS_PATH, "r") as f:
-        for line in f:
-            annotation = InvalidGraspAnnotation.model_validate_json(line)
-            remove_grasp(annotation.obj.object_category, annotation.obj.object_id, annotation.grasp_id)
+    if response.get("IsTruncated"):
+        continuation_token = response["NextContinuationToken"]
+    else:
+        break
+print("Done!")
 
-if len(annotated_grasps) == 0:
-    print("No grasps available to annotate!")
-    import sys
-    sys.exit(0)
 
 def num_annotations_category(category: str):
     n_annotations = 0
@@ -102,30 +94,64 @@ def sample_choice(arr, key):
     idx = np.random.choice(len(arr), p=weights/weights.sum())
     return arr[idx]
 
-app = FastAPI()
+def load_object_data(category: str, obj_id: str) -> tuple[trimesh.Scene, np.ndarray]:
+    datafile_key = f"{DATA_PREFIX}grasps/{category}_{obj_id}.h5"
+    with TemporaryDirectory() as tmpdir:
+        datafile_path = os.path.join(tmpdir, "data.h5")
+        s3.download_file(BUCKET_NAME, datafile_key, datafile_path)
+        with h5py.File(datafile_path, "r") as f:
+            mesh_fname: str = f["object/file"][()].decode("utf-8")
+            mtl_fname = mesh_fname[:-len(".obj")] + ".mtl"
+            mesh_path = os.path.join(tmpdir, os.path.basename(mesh_fname))
+            mtl_path = os.path.join(tmpdir, os.path.basename(mtl_fname))
+            mesh_pfx = DATA_PREFIX + os.path.dirname(mesh_fname) + "/"
+            s3.download_file(BUCKET_NAME, f"{DATA_PREFIX}{mesh_fname}", mesh_path)
+            s3.download_file(BUCKET_NAME, f"{DATA_PREFIX}{mtl_fname}", mtl_path)
+            new_mtl_lines = []
+            with open(mtl_path, "r") as mtl_f:
+                for line in mtl_f.read().splitlines():
+                    if m := re.fullmatch(r".+ (.+\.jpg)", line):
+                        texture_fname = m.group(1)
+                        assert texture_fname == os.path.basename(texture_fname), texture_fname
+                        texture_path = os.path.join(tmpdir, texture_fname)
+                        print(f"{mesh_pfx}{texture_fname}", texture_path)
+                        s3.download_file(BUCKET_NAME, f"{mesh_pfx}{texture_fname}", texture_path)
 
-class UserRequest(BaseModel):
-    username: str
+                    # TODO: add this to preprocessing script
+                    if m := re.fullmatch(r"Kd 0(?:.0)? 0(?:.0)? 0(?:.0)?", line):
+                        new_mtl_lines.append(f"Kd 1 1 1")
+                    else:
+                        new_mtl_lines.append(line)
+            with open(mtl_path, "w") as mtl_f:
+                mtl_f.write("\n".join(new_mtl_lines))
+
+            T = np.array(f["grasps/transforms"])
+            mesh_scale = f["object/scale"][()]
+        print(tmpdir)
+        obj_mesh = trimesh.load(mesh_path)
+        obj_mesh = obj_mesh.apply_scale(mesh_scale)
+        if isinstance(obj_mesh, trimesh.Scene):
+            scene = obj_mesh
+        elif isinstance(obj_mesh, trimesh.Trimesh):
+            scene = trimesh.Scene([obj_mesh])
+        else:
+            raise ValueError("Unsupported geometry type")
+    return scene, T
+
+app = FastAPI()
 
 class ObjectGraspInfo(BaseModel):
     object_category: str
     object_id: str
     grasp_id: int
 
-class MeshData(BaseModel):
-    vertices: list[float]
-    faces: list[int]
-    vertex_colors: list[float]
-
 class AnnotationSubmission(BaseModel):
     object_category: str
     object_id: str
     grasp_id: int
     description: str
-
-class MalformedMeshSubmission(BaseModel):
-    object_category: str
-    object_id: str
+    is_mesh_malformed: bool = False
+    is_grasp_invalid: bool = False
 
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp(response: Response):
@@ -147,24 +173,17 @@ async def get_object_grasp(response: Response):
         grasp_id=grasp_id
     )
 
-@app.post("/api/get-mesh-data", response_model=MeshData)
-async def get_mesh_data(request: ObjectGraspInfo):
-    category, obj_id, grasp_id = request.object_category, request.object_id, request.grasp_id
-    object_mesh: trimesh.Trimesh = load_mesh(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5", "data")
-    T, _ = load_grasps(f"{DATA_ROOT}/grasps/{category}_{obj_id}.h5")
+@app.get("/api/get-mesh-data/{category}/{obj_id}/{grasp_id}", responses={200: {"content": {"model/gltf-binary": {}}}}, response_class=Response)
+async def get_mesh_data(category: str, obj_id: str, grasp_id: int):
+    scene, T = load_object_data(category, obj_id)
     gripper_marker: trimesh.Trimesh = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
-    gripper_marker.vertices -= object_mesh.centroid
-    object_mesh.vertices -= object_mesh.centroid
+    gripper_marker.apply_translation(-scene.centroid)
+    scene.apply_translation(-scene.centroid)
+    scene.add_geometry(gripper_marker)
 
-    scene = trimesh.Scene([object_mesh, gripper_marker])
-    geom: trimesh.Trimesh = scene.to_mesh()
-    visual: trimesh.visual.ColorVisuals = geom.visual
-
-    return MeshData(
-        vertices=geom.vertices.flatten().tolist(),
-        faces=geom.faces.flatten().tolist(),
-        vertex_colors=(visual.vertex_colors[:,:3] / 255).flatten().tolist(),
-    )
+    glb_bytes = io.BytesIO()
+    scene.export(glb_bytes, file_type="glb")
+    return Response(content=glb_bytes.getvalue(), media_type="model/gltf-binary")
 
 @app.post("/api/submit-annotation")
 async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie(...)):
@@ -180,40 +199,11 @@ async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie
         obj=Object(object_category=category, object_id=obj_id),
         grasp_id=grasp_id,
         description=request.description,
+        is_mesh_malformed=request.is_mesh_malformed,
+        is_grasp_invalid=request.is_grasp_invalid,
         user_id=user_id
     )
-    async with annotation_file_lock:
-        with open(ANNOTATION_PATH, "a+") as f:
-            f.write(f"{annotation.model_dump_json()}\n")
+    # TODO: upload to S3
 
-@app.post("/api/submit-malformed")
-async def malformed_mesh(request: MalformedMeshSubmission, user_id: str = Cookie(...)):
-    print(f"User {user_id} marked as malformed: {request.object_category}_{request.object_id}")
-    annotation = MalformedAnnotation(
-        obj=Object(object_category=request.object_category, object_id=request.object_id),
-        user_id=user_id
-    )
-    async with annotation_lock:
-        remove_object(request.object_category, request.object_id)
-    async with malformed_file_lock:
-        with open(MALFORMED_PATH, "a+") as f:
-            f.write(f"{annotation.model_dump_json()}\n")
-
-@app.post("/api/submit-invalid-grasp")
-async def invalid_grasp(request: ObjectGraspInfo, user_id: str = Cookie(...)):
-    category = request.object_category
-    obj_id = request.object_id
-    grasp_id = request.grasp_id
-    print(f"User {user_id} marked as invalid grasp: {category}_{obj_id}, grasp {grasp_id}")
-    annotation = InvalidGraspAnnotation(
-        obj=Object(object_category=category, object_id=obj_id),
-        grasp_id=grasp_id,
-        user_id=user_id
-    )
-    async with annotation_lock:
-        remove_grasp(category, obj_id, grasp_id)
-    async with invalid_grasp_file_lock:
-        with open(INVALID_GRASPS_PATH, "a+") as f:
-            f.write(f"{annotation.model_dump_json()}\n")
 
 app.mount("/", StaticFiles(directory="data_annotation/build", html=True), name="static")
