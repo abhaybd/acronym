@@ -107,7 +107,6 @@ def load_object_data(category: str, obj_id: str) -> tuple[trimesh.Scene, np.ndar
             mesh_pfx = DATA_PREFIX + os.path.dirname(mesh_fname) + "/"
             s3.download_file(BUCKET_NAME, f"{DATA_PREFIX}{mesh_fname}", mesh_path)
             s3.download_file(BUCKET_NAME, f"{DATA_PREFIX}{mtl_fname}", mtl_path)
-            new_mtl_lines = []
             with open(mtl_path, "r") as mtl_f:
                 for line in mtl_f.read().splitlines():
                     if m := re.fullmatch(r".+ (.+\.jpg)", line):
@@ -116,14 +115,6 @@ def load_object_data(category: str, obj_id: str) -> tuple[trimesh.Scene, np.ndar
                         texture_path = os.path.join(tmpdir, texture_fname)
                         print(f"{mesh_pfx}{texture_fname}", texture_path)
                         s3.download_file(BUCKET_NAME, f"{mesh_pfx}{texture_fname}", texture_path)
-
-                    # TODO: add this to preprocessing script
-                    if m := re.fullmatch(r"Kd 0(?:.0)? 0(?:.0)? 0(?:.0)?", line):
-                        new_mtl_lines.append(f"Kd 1 1 1")
-                    else:
-                        new_mtl_lines.append(line)
-            with open(mtl_path, "w") as mtl_f:
-                mtl_f.write("\n".join(new_mtl_lines))
 
             T = np.array(f["grasps/transforms"])
             mesh_scale = f["object/scale"][()]
@@ -203,7 +194,9 @@ async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie
         is_grasp_invalid=request.is_grasp_invalid,
         user_id=user_id
     )
-    # TODO: upload to S3
+    annotation_key = f"{ANNOTATION_PREFIX}{category}__{obj_id}__{grasp_id}__{user_id}.json"
+    annot_bytes = io.BytesIO(annotation.model_dump_json().encode("utf-8"))
+    s3.upload_fileobj(annot_bytes, BUCKET_NAME, annotation_key)
 
 
 app.mount("/", StaticFiles(directory="data_annotation/build", html=True), name="static")

@@ -61,7 +61,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                     Description:
                     <br />
                     <textarea
-                        value={isMalformed || isInvalidGrasp ? "" : description}
+                        value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         disabled={isDisabled}
                         required={true}
@@ -89,7 +89,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot }) =
                         <span>Invalid grasp:</span>
                         <input
                             type="checkbox"
-                            checked={isInvalidGrasp && !isMalformed}
+                            checked={isInvalidGrasp}
                             onChange={(e) => setIsInvalidGrasp(e.target.checked)}
                             disabled={isDisabled}
                         />
