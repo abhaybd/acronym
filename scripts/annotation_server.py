@@ -119,12 +119,10 @@ def load_object_data(category: str, obj_id: str) -> tuple[trimesh.Scene, np.ndar
                         texture_fname = m.group(1)
                         assert texture_fname == os.path.basename(texture_fname), texture_fname
                         texture_path = os.path.join(tmpdir, texture_fname)
-                        print(f"{mesh_pfx}{texture_fname}", texture_path)
                         s3.download_file(BUCKET_NAME, f"{mesh_pfx}{texture_fname}", texture_path)
 
             T = np.array(f["grasps/transforms"])
             mesh_scale = f["object/scale"][()]
-        print(tmpdir)
         obj_mesh = trimesh.load(mesh_path)
         obj_mesh = obj_mesh.apply_scale(mesh_scale)
         if isinstance(obj_mesh, trimesh.Scene):

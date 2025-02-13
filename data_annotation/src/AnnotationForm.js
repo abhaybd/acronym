@@ -10,15 +10,16 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
     const [isMalformed, setIsMalformed] = useState(false);
     const [isInvalidGrasp, setIsInvalidGrasp] = useState(false);
     const [startTime, setStartTime] = useState(null);
-    const [userID, setUserID] = useState(null);
+    const [userID, setUserID] = useState("");
 
     useEffect(() => {
-        if (!localStorage.getItem("user_id")) {
-            const user_id = uuidv4();
+        let user_id = localStorage.getItem("user_id");
+        if (!user_id) {
+            user_id = uuidv4();
             localStorage.setItem("user_id", user_id);
-            if (!prolific_code) {
-                setUserID(user_id);
-            }
+        }
+        if (!prolific_code) {
+            setUserID(user_id);
         }
     }, []);
 
@@ -83,7 +84,10 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                 <label>
                     User ID:
                     <br />
-                    <input type="text" value={userID} />
+                    <input
+                        type="text" value={userID}
+                        onChange={e => setUserID(e.target.value)}
+                        required={true} />
                 </label>
             </div>
             <div className="form-group">
