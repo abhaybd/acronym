@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BsFillInfoCircleFill } from "react-icons/bs";
 import { useNavigate } from 'react-router';
+import { v4 as uuidv4 } from 'uuid';
 import './AnnotationForm.css';
 
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, prolific_code }) => {
@@ -8,17 +9,37 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
     const [description, setDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState(false);
     const [isInvalidGrasp, setIsInvalidGrasp] = useState(false);
+    const [startTime, setStartTime] = useState(null);
+    const [userID, setUserID] = useState(null);
+
+    useEffect(() => {
+        if (!localStorage.getItem("user_id")) {
+            const user_id = uuidv4();
+            localStorage.setItem("user_id", user_id);
+            if (!prolific_code) {
+                setUserID(user_id);
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        setStartTime(Date.now());
+    }, [category, object_id, grasp_id]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         let endpoint = "/api/submit-annotation";
         let data = {
-            "object_category": category,
-            "object_id": object_id,
+            "obj": {
+                "object_category": category,
+                "object_id": object_id,
+            },
             "grasp_id": grasp_id,
             "description": description,
             "is_mesh_malformed": isMalformed,
-            "is_grasp_invalid": isInvalidGrasp
+            "is_grasp_invalid": isInvalidGrasp,
+            "user_id": userID,
+            "time_taken": (Date.now() - startTime) / 1000,
         };
 
         try {
@@ -57,6 +78,13 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
         <form onSubmit={handleSubmit} className="annotation-form">
             <div className="form-group">
                 {category && <p>Object: {category}</p>}
+            </div>
+            <div className="form-group" hidden={!prolific_code}>
+                <label>
+                    User ID:
+                    <br />
+                    <input type="text" value={userID} />
+                </label>
             </div>
             <div className="form-group">
                 <label>

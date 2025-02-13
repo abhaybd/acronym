@@ -17,6 +17,7 @@ const Tutorial = ({ onClose }) => {
           <p>
               This is a data annotation tool for semantic grasping.
               When given a 3D object and a grasp, users should describe that grasp relative to the object.
+              Users can rotate and zoom the object by clicking and dragging in the 3D viewer to get a better view.
               The mesh may be broken or malformed, or the displayed grasp could be invalid.
               In these cases, users should check the corresponding checkboxes, but still provide a best-effort grasp description.
           </p>

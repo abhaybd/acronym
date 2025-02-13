@@ -10,4 +10,5 @@ class Annotation(BaseModel, frozen=True):
     description: str
     is_mesh_malformed: bool = False
     is_grasp_invalid: bool = False
-    user_id: str
+    user_id: str = ""
+    time_taken: float = -1.0

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Cookie, Response
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
@@ -14,7 +14,7 @@ import boto3
 import re
 
 from acronym_tools import create_gripper_marker
-from annotation import Object, Annotation
+from annotation import Annotation
 
 s3 = boto3.client("s3")
 
@@ -142,13 +142,6 @@ class ObjectGraspInfo(BaseModel):
     object_id: str
     grasp_id: int
 
-class AnnotationSubmission(BaseModel):
-    object_category: str
-    object_id: str
-    grasp_id: int
-    description: str
-    is_mesh_malformed: bool = False
-    is_grasp_invalid: bool = False
 
 @app.post("/api/get-object-info", response_model=ObjectGraspInfo)
 async def get_object_grasp(response: Response):
@@ -183,23 +176,16 @@ async def get_mesh_data(category: str, obj_id: str, grasp_id: int):
     return Response(content=glb_bytes.getvalue(), media_type="model/gltf-binary")
 
 @app.post("/api/submit-annotation")
-async def submit_annotation(request: AnnotationSubmission, user_id: str = Cookie(...)):
+async def submit_annotation(annotation: Annotation):
     async with annotation_lock:
         total_annotations = sum(map(num_annotations_category, annotated_grasps.keys()))
-    print(f"User {user_id} annotated: {request.object_category}_{request.object_id}, grasp {request.grasp_id}. Total annotations: {total_annotations+1}")
-    category = request.object_category
-    obj_id = request.object_id
-    grasp_id = request.grasp_id
+    category = annotation.obj.object_category
+    obj_id = annotation.obj.object_id
+    grasp_id = annotation.grasp_id
+    user_id = annotation.user_id
+    print(f"User {user_id} annotated: {category}_{obj_id}, grasp {grasp_id}. Total annotations: {total_annotations+1}")
 
     annotated_grasps[category][obj_id][grasp_id] = True
-    annotation = Annotation(
-        obj=Object(object_category=category, object_id=obj_id),
-        grasp_id=grasp_id,
-        description=request.description,
-        is_mesh_malformed=request.is_mesh_malformed,
-        is_grasp_invalid=request.is_grasp_invalid,
-        user_id=user_id
-    )
     annotation_key = f"{ANNOTATION_PREFIX}{category}__{obj_id}__{grasp_id}__{user_id}.json"
     annot_bytes = io.BytesIO(annotation.model_dump_json().encode("utf-8"))
     s3.upload_fileobj(annot_bytes, BUCKET_NAME, annotation_key)
