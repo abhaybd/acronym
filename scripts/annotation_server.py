@@ -16,6 +16,7 @@ import re
 from acronym_tools import create_gripper_marker
 from annotation import Object, Annotation
 
+s3 = boto3.client("s3")
 
 BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
@@ -32,18 +33,19 @@ annotated_grasps: dict[str, dict[str, dict[int, bool]]] = {}
 annotation_lock = asyncio.Lock()
 
 # load annotation skeleton
-with open("data/annotation_skeleton.pkl", "rb") as f:
-    skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(f)
-    for category, objs in skeleton.items():
-        annotated_grasps[category] = {}
-        for obj_id, grasps in objs.items():
-            if len(grasps) > 0:
-                annotated_grasps[category][obj_id] = grasps
+skeleton_bytes = io.BytesIO()
+s3.download_fileobj(BUCKET_NAME, f"{DATA_PREFIX}annotation_skeleton.pkl", skeleton_bytes)
+skeleton_bytes.seek(0)
+skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(skeleton_bytes)
+for category, objs in skeleton.items():
+    annotated_grasps[category] = {}
+    for obj_id, grasps in objs.items():
+        if len(grasps) > 0:
+            annotated_grasps[category][obj_id] = grasps
 
 assert all(c in annotated_grasps for c in CATEGORIES), "Some categories are missing from the annotation skeleton!"
 
 print("Loading existing annotations...")
-s3 = boto3.client("s3")
 continuation_token = None
 while True:
     list_kwargs = {"Bucket": BUCKET_NAME, "Prefix": ANNOTATION_PREFIX}

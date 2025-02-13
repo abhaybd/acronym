@@ -1,5 +1,12 @@
-data
-!data/annotation_skeleton.pkl
-annotations
-**/*.egg-info
 .git
+Dockerfile
+**/*.gitignore
+.dockerignore
+
+**/*.egg-info
+**/__pycache__
+
+data_annotation/build
+data_annotation/node_modules
+
+data
