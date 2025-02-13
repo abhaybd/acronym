@@ -9,6 +9,9 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
+GRIPPER_POS_OFFSET = 0.075
+
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("grasps_root")
@@ -22,17 +25,20 @@ def rot_distance(rot_deltas: np.ndarray):
     return R.from_matrix(rot_deltas).magnitude()
 
 
-def grasp_dist(grasp: np.ndarray, grasps2: np.ndarray):
+def grasp_dist(grasp: np.ndarray, all_grasps: np.ndarray):
+    """Distance between a grasp and a set of grasps."""
     assert grasp.ndim == 2
-    if grasps2.ndim == 2:
-        grasps2 = grasps2[None]
-    pos_dist = np.linalg.norm(grasp[None, :3, 3] - grasps2[:, :3, 3], axis=1)
+    if all_grasps.ndim == 2:
+        all_grasps = all_grasps[None]
+    grasp_pos = grasp[:3, 3] + GRIPPER_POS_OFFSET * grasp[:3, 2]
+    all_grasps_pos = all_grasps[:, :3, 3] + GRIPPER_POS_OFFSET * all_grasps[:, :3, 2]
+    pos_dist = np.linalg.norm(grasp_pos[None] - all_grasps_pos, axis=1)
 
-    rd1 = rot_distance(grasps2[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3])
-    rd2 = rot_distance(grasps2[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3] @ R.from_euler("z", [np.pi]).as_matrix())
+    rd1 = rot_distance(all_grasps[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3])
+    rd2 = rot_distance(all_grasps[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3] @ R.from_euler("z", [np.pi]).as_matrix())
     rot_dist = np.minimum(rd1, rd2)
 
-    return pos_dist + 0.05 * rot_dist
+    return pos_dist + 0.01 * rot_dist
 
 
 def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):

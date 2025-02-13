@@ -391,11 +391,9 @@ def load_mesh(filename, mesh_root_dir, scale=None):
     obj_mesh = obj_mesh.apply_scale(mesh_scale)
 
     if isinstance(obj_mesh, trimesh.Scene):
-        for geom in obj_mesh.geometry.values():
-            bake_texture(geom)
         obj_mesh = obj_mesh.to_mesh()
     elif isinstance(obj_mesh, trimesh.Trimesh):
-        bake_texture(obj_mesh)
+        pass
     else:
         raise ValueError("Unsupported mesh type")
 

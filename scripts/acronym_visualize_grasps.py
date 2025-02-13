@@ -43,6 +43,7 @@ def make_parser():
     parser.add_argument(
         "--mesh_root", default=".", help="Directory used for loading meshes."
     )
+    parser.add_argument("--not-subsampled", action="store_false", dest="subsampled")
     return parser
 
 
@@ -55,7 +56,7 @@ def main(argv=sys.argv[1:]):
         obj_mesh = load_mesh(f, mesh_root_dir=args.mesh_root)
 
         # get transformations and quality of all simulated grasps
-        T, success = load_grasps(f)
+        T, success = load_grasps(f, load_subsampled=args.subsampled)
 
         # create visual markers for grasps
         succ_idxs = np.where(success == 1)[0]
