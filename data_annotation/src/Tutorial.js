@@ -16,10 +16,14 @@ const Tutorial = ({ onClose }) => {
           <h2>Tutorial</h2>
           <p>
               This is a data annotation tool for semantic grasping.
-              When given a 3D object and a grasp, users should describe that grasp relative to the object.
-              Users can rotate and zoom the object by clicking and dragging in the 3D viewer to get a better view.
-              The mesh may be broken or malformed, or the displayed grasp could be invalid.
-              In these cases, users should check the corresponding checkboxes, but still provide a best-effort grasp description.
+              Users are shown a 3D object and a grasp, and can rotate and zoom the object by clicking and dragging in the 3D viewer to get a better view.
+              Given this visualization, users should input the following:
+              <ul>
+                <li>A description of the grasp relative to the object</li>
+                <li>Whether the mesh is malformed</li>
+                <li>Whether the grasp is invalid</li>
+              </ul>
+              If the mesh is malformed or the grasp is invalid, users should check the corresponding checkboxes, and still provide a best-effort grasp description.
           </p>
 
           <h3>Grasp Description</h3>
@@ -33,17 +37,20 @@ const Tutorial = ({ onClose }) => {
           <h3>Malformed Mesh</h3>
           <img src={malformed_mesh_img} alt="Malformed mesh example" className="tutorial-image" />
           <p>
-            The <strong>Malformed Mesh</strong> checkbox is for when a mesh is broken, due to textures or backwards triangles.
+            The <strong>Malformed Mesh</strong> checkbox is for when a mesh is broken, due to bad textures or invisible walls.
             For example, the texture on this milk carton is broken, causing it to appear completely black.
             This object should be marked as a malformed mesh.
+          </p>
+          <p>
+            In general, if you can't tell what the mesh is supposed to be, mark it as malformed.
           </p>
 
           <h3>Invalid Grasp</h3>
           <img src={invalid_grasp_img} alt="Invalid grasp example" className="tutorial-image" />
           <p>
-            The <strong>Invalid Grasp</strong> checkbox is for when the grasp is illogical or isn't grasping a rigid part of the object.
+            The <strong>Invalid Grasp</strong> checkbox is for when the grasp is physically infeasible, or isn't grasping a rigid part of the object.
             For example, the grasp shown here is on the wafts of steam from a mug.
-            This grasp is illogical, since steam can't be grasped, so this grasp should be marked as invalid.
+            This grasp is infeasible, since steam can't be grasped, so this grasp should be marked as invalid.
           </p>
         </div>
       </div>

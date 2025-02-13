@@ -56,3 +56,17 @@ blockquote {
 .dimmed {
   filter: blur(2px);
 }
+
+/* For Webkit-based browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: gray;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
