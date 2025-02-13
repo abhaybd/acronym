@@ -21,8 +21,11 @@ BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
 ANNOTATION_PREFIX = "semantic-grasping/annotations/"
 
-with open("categories.txt", "r") as f:
-    CATEGORIES = set(f.read().splitlines())
+if "ANNOT_CATEGORIES" in os.environ:
+    CATEGORIES = set(s.strip() for s in os.environ["ANNOT_CATEGORIES"].split(","))
+else:
+    with open("categories.txt", "r") as f:
+        CATEGORIES = set(f.read().splitlines())
 
 # maps (category, object_id, grasp_id) -> whether the grasp is annotated
 annotated_grasps: dict[str, dict[str, dict[int, bool]]] = {}
@@ -36,6 +39,8 @@ with open("data/annotation_skeleton.pkl", "rb") as f:
         for obj_id, grasps in objs.items():
             if len(grasps) > 0:
                 annotated_grasps[category][obj_id] = grasps
+
+assert all(c in annotated_grasps for c in CATEGORIES), "Some categories are missing from the annotation skeleton!"
 
 print("Loading existing annotations...")
 s3 = boto3.client("s3")
