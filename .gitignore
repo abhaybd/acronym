@@ -1,4 +1,6 @@
 *.pyc
-data/
 **/*.egg-info
 **/__pycache__
+
+data/
+annotations/

@@ -7,8 +7,8 @@ import './AnnotationForm.css';
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, prolific_code }) => {
     const navigate = useNavigate();
     const [description, setDescription] = useState('');
-    const [isMalformed, setIsMalformed] = useState(false);
-    const [isInvalidGrasp, setIsInvalidGrasp] = useState(false);
+    const [isMalformed, setIsMalformed] = useState('');
+    const [graspLabel, setGraspLabel] = useState('');
     const [startTime, setStartTime] = useState(null);
     const [userID, setUserID] = useState("");
 
@@ -21,35 +21,40 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
         if (!prolific_code) {
             setUserID(user_id);
         }
-    }, []);
+    }, [prolific_code]);
+
+    const resetForm = () => {
+        setDescription("");
+        setIsMalformed("");
+        setGraspLabel("");
+    };
 
     useEffect(() => {
         setStartTime(Date.now());
+        resetForm();
     }, [category, object_id, grasp_id]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        let endpoint = "/api/submit-annotation";
-        let data = {
-            "obj": {
-                "object_category": category,
-                "object_id": object_id,
-            },
-            "grasp_id": grasp_id,
-            "description": description,
-            "is_mesh_malformed": isMalformed,
-            "is_grasp_invalid": isInvalidGrasp,
-            "user_id": userID,
-            "time_taken": (Date.now() - startTime) / 1000,
-        };
 
         try {
-            const response = await fetch(endpoint, {
+            const response = await fetch("/api/submit-annotation", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(data),
+                body: JSON.stringify({
+                    "obj": {
+                        "object_category": category,
+                        "object_id": object_id,
+                    },
+                    "grasp_id": grasp_id,
+                    "description": description,
+                    "is_mesh_malformed": isMalformed === 'yes',
+                    "grasp_label": graspLabel,
+                    "user_id": userID,
+                    "time_taken": (Date.now() - startTime) / 1000,
+                }),
             });
 
             if (!response.ok) {
@@ -62,9 +67,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
             alert('An error occurred while submitting the annotation');
         }
         if (!oneshot) {
-            setDescription("");
-            setIsMalformed(false);
-            setIsInvalidGrasp(false);
+            resetForm();
             await fetchMesh();
         } else if (prolific_code) {
             window.location.href = `https://app.prolific.com/submissions/complete?cc=${prolific_code}`;
@@ -99,34 +102,44 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                         onChange={(e) => setDescription(e.target.value)}
                         disabled={isDisabled}
                         required={true}
+                        minLength={20}
                     />
                 </label>
             </div>
             <div className="form-group">
-                <label title="Check if this mesh is broken (missing/transparent faces, no texturing, impossible to tell what it is)">
+                <label title="Select if this mesh is broken (missing/transparent faces, no texturing, impossible to tell what it is)">
                     <div style={{ display: "flex", alignItems: "center" }}>
                         <BsFillInfoCircleFill color="gray" className="info-icon" />
                         <span>Mesh is malformed:</span>
-                        <input
-                            type="checkbox"
-                            checked={isMalformed}
-                            onChange={(e) => setIsMalformed(e.target.checked)}
+                        <select
+                            value={isMalformed}
+                            onChange={(e) => setIsMalformed(e.target.value)}
                             disabled={isDisabled}
-                        />
+                            required
+                        >
+                            <option value="" disabled></option>
+                            <option value="no">No</option>
+                            <option value="yes">Yes</option>
+                        </select>
                     </div>
                 </label>
             </div>
             <div className="form-group">
-                <label title="Check if this grasp is bad (not firmly on the object, not grasping a solid part, etc)">
+                <label title="Select the appropriateness of the grasp, see tutorial for details">
                     <div style={{ display: "flex", alignItems: "center" }}>
                         <BsFillInfoCircleFill color="gray" className="info-icon" />
-                        <span>Invalid grasp:</span>
-                        <input
-                            type="checkbox"
-                            checked={isInvalidGrasp}
-                            onChange={(e) => setIsInvalidGrasp(e.target.checked)}
+                        <span>Grasp Label:</span>
+                        <select
+                            value={graspLabel}
+                            onChange={(e) => setGraspLabel(e.target.value)}
                             disabled={isDisabled}
-                        />
+                            required
+                        >
+                            <option value="" disabled></option>
+                            <option value="good">Good Grasp</option>
+                            <option value="bad">Bad Grasp</option>
+                            <option value="infeasible">Infeasible Grasp</option>
+                        </select>
                     </div>
                 </label>
             </div>

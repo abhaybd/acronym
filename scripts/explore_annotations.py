@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 
 from acronym_tools import create_gripper_marker
-from annotation import Annotation
+from annotation import Annotation, GraspLabel
 
 s3 = boto3.client("s3")
 BUCKET_NAME = "prior-datasets"
@@ -52,7 +52,11 @@ def process_annotations():
     for filename in os.listdir(LOCAL_ANNOTATION_DIR):
         if filename.endswith(".json"):
             with open(os.path.join(LOCAL_ANNOTATION_DIR, filename), "r") as f:
-                data = Annotation.model_validate_json(f.read())
+                data = json.load(f)
+                if "is_grasp_invalid" in data:
+                    data["grasp_label"] = GraspLabel.INFEASIBLE if data["is_grasp_invalid"] else GraspLabel.BAD
+                    del data["is_grasp_invalid"]
+                data = Annotation(**data)
                 annotations.append(data)
     return annotations
 
