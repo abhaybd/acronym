@@ -106,14 +106,23 @@ def load_object_data(category: str, obj_id: str) -> tuple[trimesh.Scene, np.ndar
             raise ValueError("Unsupported geometry type")
     return scene, T
 
-def visualize_observation(category, obj_id, grasp_id):
-    # Load object data and visualize using trimesh
-    scene, T = load_object_data(category, obj_id)
-    gripper_marker = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[grasp_id])
+def visualize_annotation(annotation: Annotation):
+    print(f"Annotation from user {annotation.user_id}")
+    print(f"\tObject: {annotation.obj.object_category}_{annotation.obj.object_id}")
+    print(f"\tGrasp ID: {annotation.grasp_id}")
+    print(f"\tLabel: {annotation.grasp_label}")
+    print(f"\tMesh Malformed: {annotation.is_mesh_malformed}")
+    print(f"\tTime taken: {annotation.time_taken:.2f} sec")
+    print(f"\tDescription: {annotation.description}")
+
+    load_object_data(annotation.obj.object_category, annotation.obj.object_id)
+
+    scene, T = load_object_data(annotation.obj.object_category, annotation.obj.object_id)
+    gripper_marker = create_gripper_marker(color=[0, 255, 0]).apply_transform(T[annotation.grasp_id])
     gripper_marker.apply_translation(-scene.centroid)
     scene.apply_translation(-scene.centroid)
     scene.add_geometry(gripper_marker)
-    scene.show()
+    scene.to_mesh().show()
 
 if __name__ == "__main__":
     import argparse
@@ -121,6 +130,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Explore and visualize annotations.")
     parser.add_argument("--plot", action="store_true", help="Plot histogram of time taken.")
     parser.add_argument("-v", "--visualize", nargs=3, metavar=("CATEGORY", "OBJ_ID", "GRASP_ID"), help="Visualize a specific observation.")
+    parser.add_argument("-r", "--random-viz", action="store_true", help="Visualize a random observation.")
     args = parser.parse_args()
 
     download_annotations()
@@ -134,4 +144,9 @@ if __name__ == "__main__":
 
     if args.visualize:
         category, obj_id, grasp_id = args.visualize
-        visualize_observation(category, obj_id, int(grasp_id))
+        annot = next((a for a in annotations if a.obj.object_category == category and a.obj.object_id == obj_id and a.grasp_id == int(grasp_id)), None)
+        visualize_annotation(annot)
+
+    if args.random_viz:
+        annotation: Annotation = np.random.choice(annotations)
+        visualize_annotation(annotation)
