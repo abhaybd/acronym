@@ -1,7 +1,12 @@
 import argparse
 import random
+import io
+import boto3
 
 import pickle
+
+BUCKET_NAME = "prior-datasets"
+DATA_PREFIX = "semantic-grasping/acronym/"
 
 def get_args():
     args = argparse.ArgumentParser()
@@ -14,8 +19,11 @@ def get_args():
 def main():
     args = get_args()
 
-    with open("data/annotation_skeleton.pkl", "rb") as f:
-        skeleton = pickle.load(f)
+    skeleton_bytes = io.BytesIO()
+    s3 = boto3.client("s3")
+    s3.download_fileobj(BUCKET_NAME, f"{DATA_PREFIX}annotation_skeleton.pkl", skeleton_bytes)
+    skeleton_bytes.seek(0)
+    skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(skeleton_bytes)
 
     urls = []
     for category in args.categories:
