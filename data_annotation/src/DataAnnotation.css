@@ -13,7 +13,7 @@
     margin-bottom: 20px;
 }
 
-.fetch-button, .tutorial-button {
+.ai2-button {
     background-color: #ff69b4; /* pink */
     color: white;
     padding: 10px 20px;
@@ -23,11 +23,11 @@
     transition: background-color 0.3s ease;
 }
 
-.fetch-button:hover, .tutorial-button:hover {
+.ai2-button:hover {
     background-color: #ff1493; /* darker pink */
 }
 
-.fetch-button:disabled {
+.ai2-button:disabled {
     background-color: #ffb6c1; /* light pink */
     cursor: not-allowed;
 }
@@ -37,12 +37,16 @@
     align-items: center;
     justify-content: center;
     position: relative;
+    /* flex-direction: column; */
+}
+
+.canvas-container-toolbar {
+    margin-right: 20px;
 }
 
 .canvas-container {
     width: 800px;
     height: 600px;
-    margin-right: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -50,6 +54,18 @@
     border-radius: 10px;
     position: relative;
     /* border: black 1px solid; */
+}
+
+.canvas-toolbar {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+}
+
+.instructions {
+    margin-right: auto;
 }
 
 .spinner {

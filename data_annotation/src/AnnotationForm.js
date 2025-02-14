@@ -130,7 +130,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                     </div>
                 </label>
             </div>
-            <button type="submit" disabled={isDisabled} className="submit-button">Submit</button>
+            <button type="submit" disabled={isDisabled} className="ai2-button">Submit</button>
         </form>
     );
 };

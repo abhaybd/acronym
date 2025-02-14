@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState, useRef } from 'react';
 import { Canvas, useLoader } from '@react-three/fiber';
 import { OrbitControls, Environment } from '@react-three/drei';
 import { createSearchParams, useNavigate, useSearchParams } from 'react-router';
@@ -14,6 +14,7 @@ const DataAnnotation = () => {
   const [meshURL, setMeshURL] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const orbitRef = useRef();
 
   useEffect(() => {
     THREE.Object3D.DEFAULT_UP = new THREE.Vector3(0, 0, 1);
@@ -80,25 +81,31 @@ const DataAnnotation = () => {
   return (
     <div className="data-annotation-container">
       <div className="button-container">
-        <button onClick={fetchObjectInfo} className="fetch-button" disabled={loading} hidden={oneshot}>
+        <button className="ai2-button" onClick={fetchObjectInfo} disabled={loading} hidden={oneshot}>
           {loading ? 'Loading...' : 'Fetch Mesh'}
         </button>
-        <button onClick={() => setShowTutorial(true)} className="tutorial-button">Show Tutorial</button>
+        <button className="ai2-button" onClick={() => setShowTutorial(true)}>Show Tutorial</button>
       </div>
       <div className={`content-container ${showTutorial ? 'dimmed' : ''}`}>
-        <div className="canvas-container">
-          {loading && <div className="spinner"></div>}
-          {meshURL && (
-            <Canvas camera={{ position: [0, 0.4, 0.6], near: 0.05, far: 20, fov: 45 }}>
-              <Suspense fallback={null}>
-                <Environment preset="sunset" />
-                <OrbitControls />
-                <GLTFMesh
-                  meshURL={meshURL}
-                />
-              </Suspense>
-            </Canvas>
-          )}
+        <div className="canvas-container-toolbar">
+          <div className="canvas-container">
+            {loading && <div className="spinner"></div>}
+            {meshURL && (
+              <Canvas camera={{ position: [0, 0.4, 0.6], near: 0.05, far: 20, fov: 45 }}>
+                <Suspense fallback={null}>
+                  <Environment preset="sunset" />
+                  <OrbitControls ref={orbitRef} />
+                  <GLTFMesh
+                    meshURL={meshURL}
+                  />
+                </Suspense>
+              </Canvas>
+            )}
+          </div>
+          <div className="canvas-toolbar">
+            <p className='instructions'>Left click + drag to rotate, right click + drag to pan, scroll to zoom.</p>
+            <button onClick={() => orbitRef.current.reset()} className="ai2-button" disabled={!orbitRef.current}>Reset View</button>
+          </div>
         </div>
         <AnnotationForm
           category={searchParams.get("object_category")}

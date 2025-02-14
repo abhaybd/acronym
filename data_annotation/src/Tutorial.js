@@ -16,8 +16,7 @@ const Tutorial = ({ onClose }) => {
           <h2>Tutorial</h2>
           <p>
               This is a data annotation tool for semantic grasping.
-              Users are shown a 3D object and a grasp, and can rotate and zoom the object by clicking and dragging in the 3D viewer to get a better view.
-              Given this visualization, users should input the following:
+              Given a 3D object and a grasp, users should input the following:
               <ul>
                 <li>A description of the grasp relative to the object</li>
                 <li>Whether the mesh is malformed</li>
@@ -42,7 +41,7 @@ const Tutorial = ({ onClose }) => {
             This object should be marked as a malformed mesh.
           </p>
           <p>
-            In general, if you can't tell what the mesh is supposed to be, mark it as malformed.
+            In general, a mesh should be marked as malformed if it's difficult to tell what the object is.
           </p>
 
           <h3>Invalid Grasp</h3>
@@ -52,6 +51,9 @@ const Tutorial = ({ onClose }) => {
             For example, the grasp shown here is on the wafts of steam from a mug.
             This grasp is infeasible, since steam can't be grasped, so this grasp should be marked as invalid.
           </p>
+          <p>
+            A grasp is not invalid just because it's suboptimal. For example, a grasp on the wall of a pan is valid, since it's physically feasible.
+          </p>
         </div>
       </div>
     </div>
@@ -59,5 +61,3 @@ const Tutorial = ({ onClose }) => {
 };
 
 export default Tutorial;
-
-
