@@ -11,12 +11,16 @@ from acronym_tools import load_mesh, load_grasps
 import sys; sys.path.append("./scripts")
 from annotation import Annotation, GraspLabel
 
+
+class RejectionSampleError(Exception):
+    pass
+
 def rejection_sample(sampler_fn: Callable[[], Any], condition_fn: Callable[[Any], bool], max_iters: int = 1000):
     for _ in range(max_iters):
         sample = sampler_fn()
         if condition_fn(sample):
             return sample
-    raise StopIteration("Failed to sample")
+    raise RejectionSampleError("Failed to sample")
 
 def load_annotation(path: str):
     with open(path) as f:

@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 from pydantic import BaseModel
 
-from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, random_cam_params, rejection_sample
+from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, random_cam_params, rejection_sample, RejectionSampleError
 from annotation import Annotation
 
 from acronym_tools import create_gripper_marker
@@ -21,7 +21,7 @@ class DatagenConfig(BaseModel):
     img_size: tuple[int, int] = (480, 640)  # (height, width)
     cam_elevation_range: tuple[float, float] = (0, np.pi/3)  # radians
 
-datagen_cfg = DatagenConfig()
+datagen_cfg = DatagenConfig()  # TODO load from disk
 
 def random_range(range):
     return np.random.rand() * np.diff(range).item() + range[0]
@@ -100,7 +100,7 @@ def sample_camera_pose(
 
     return n_visible >= 3
 
-def generate_scene(
+def sample_arrangement(
     object_mesh: trimesh.Trimesh,
     background_meshes: list[trimesh.Trimesh],
     support_mesh: trimesh.Trimesh,
@@ -124,7 +124,9 @@ def generate_scene(
     obj_transform = scene.get_transform("annot_object")
     grasp = obj_transform @ grasp_local
 
-    # TODO: check if grasp is collision-free
+    gripper_collision_mesh = trimesh.load("data/franka_gripper_collision_mesh.stl")
+    if scene.in_collision_single(gripper_collision_mesh, grasp):
+        return None
 
     gripper_mesh: trimesh.Trimesh = create_gripper_marker()
     gripper_mesh.apply_transform(grasp)
@@ -132,7 +134,7 @@ def generate_scene(
 
     try:
         rejection_sample(lambda: sample_camera_pose(scene, grasp), lambda x: x, 100)
-    except StopIteration:
+    except RejectionSampleError:
         return None
 
     return scene
@@ -159,7 +161,14 @@ def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, sup
     grasps_local, _ = object_library.grasps(category, obj_id)
     grasp_local = grasps_local[annot.grasp_id]
 
-    return generate_scene(object_mesh, background_meshes, support_mesh, grasp_local)
+    try:
+        return rejection_sample(
+            lambda: sample_arrangement(object_mesh, background_meshes, support_mesh, grasp_local),
+            lambda x: x is not None,
+            10
+        )
+    except RejectionSampleError:
+        return None
 
 
 def main():
@@ -178,6 +187,7 @@ def main():
 
     scene: ss.Scene = rejection_sample(lambda: sample_scene(annotations, object_library, support_library), lambda x: x is not None, 100)
     scene.show()
+    # TODO: generate image and depth map, then save to disk
 
 if __name__ == "__main__":
     main()
