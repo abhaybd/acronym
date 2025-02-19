@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 from pydantic import BaseModel
 
-from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, random_cam_params, rejection_sample, RejectionSampleError
+from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError
 from annotation import Annotation
 
 from acronym_tools import create_gripper_marker
@@ -13,18 +13,15 @@ import scene_synthesizer as ss
 
 
 class DatagenConfig(BaseModel):
-    cam_dfov_range: tuple[float, float] = (60.0, 120.0)  # degrees
+    cam_dfov_range: tuple[float, float] = (60.0, 90.0)  # degrees
     cam_dist_range: tuple[float, float] = (1.0, 1.5)  # meters
-    cam_pitch_perturb: float = 0.3  # fraction of YFOV
+    cam_pitch_perturb: float = 0.2  # fraction of YFOV
     cam_yaw_perturb: float = 0.3  # fraction of XFOV
     cam_roll_perturb: float = np.pi/8  # radians
     img_size: tuple[int, int] = (480, 640)  # (height, width)
     cam_elevation_range: tuple[float, float] = (0, np.pi/3)  # radians
 
 datagen_cfg = DatagenConfig()  # TODO load from disk
-
-def random_range(range):
-    return np.random.rand() * np.diff(range).item() + range[0]
 
 SUPPORT_CATEGORIES = [
     # "1Shelves",
@@ -38,27 +35,39 @@ SUPPORT_CATEGORIES = [
     "Table"
 ]
 
+ALL_OBJECT_CATEGORIES = open("all_categories.txt").read().splitlines()
+
+GRASP_LOCAL_POINTS = np.array([
+    [0.041, 0, 0.066],
+    [0.041, 0, 0.112],
+    [0, 0, 0.066],
+    [-0.041, 0, 0.112],
+    [-0.041, 0, 0.066]
+])
+
 def sample_camera_pose(
     scene: ss.Scene,
     grasp_pose: np.ndarray,
+    cam_dfov: float
 ):
-    cam_dfov = random_range(datagen_cfg.cam_dfov_range)
     img_h, img_w = datagen_cfg.img_size
-    cam_params = random_cam_params(img_w, img_h, cam_dfov)
+    cam_params = construct_cam_K(img_w, img_h, cam_dfov)
     cam_xfov = 2 * np.arctan(img_w / (2 * cam_params[0, 0]))
     cam_yfov = 2 * np.arctan(img_h / (2 * cam_params[1, 1]))
 
-    cam_dist = random_range(datagen_cfg.cam_dist_range)
-    inclination = np.pi/2 - random_range(datagen_cfg.cam_elevation_range)
+    grasp_pos = grasp_pose[:-1] @ np.concatenate([GRASP_LOCAL_POINTS[2], [1]])
+
+    cam_dist = np.random.uniform(*datagen_cfg.cam_dist_range)
+    inclination = np.pi/2 - np.random.uniform(*datagen_cfg.cam_elevation_range)
     azimuth = np.random.rand() * 2 * np.pi
     cam_pose = np.eye(4)
     cam_pose[:3, 3] = np.array([
         cam_dist * np.sin(inclination) * np.cos(azimuth),
         cam_dist * np.sin(inclination) * np.sin(azimuth),
         cam_dist * np.cos(inclination)
-    ]) + grasp_pose[:3, 3]
+    ]) + grasp_pos
     cam_pose[:3, :3] = \
-        look_at_rot(cam_pose[:3, 3], grasp_pose[:3, 3]) @ \
+        look_at_rot(cam_pose[:3, 3], grasp_pos) @ \
         random_delta_rot(
             datagen_cfg.cam_roll_perturb,
             datagen_cfg.cam_pitch_perturb * np.radians(cam_yfov),
@@ -71,14 +80,7 @@ def sample_camera_pose(
     if scene.in_collision_single(camera_collider, cam_pose):
         return False
 
-    grasp_local_points = np.array([
-        [0.041, 0, 0.066],
-        [0.041, 0, 0.112],
-        [0, 0, 0.066],
-        [-0.041, 0, 0.112],
-        [-0.041, 0, 0.066]
-    ])
-    grasp_points = np.concatenate([grasp_local_points, np.ones((len(grasp_local_points), 1))], axis=1) @ grasp_pose[:-1].T
+    grasp_points = np.concatenate([GRASP_LOCAL_POINTS, np.ones((len(GRASP_LOCAL_POINTS), 1))], axis=1) @ grasp_pose[:-1].T
     ray_origins = np.tile(cam_pose[:3, 3], (len(grasp_points), 1))
     ray_directions = grasp_points - ray_origins
     ray_directions /= np.linalg.norm(ray_directions, axis=1, keepdims=True)
@@ -87,7 +89,7 @@ def sample_camera_pose(
     intersect_points, ray_idxs, _ = scene_mesh.ray.intersects_location(ray_origins, ray_directions)
     n_visible = 0
     visible_idxs = []
-    for i in range(len(grasp_local_points)):
+    for i in range(len(GRASP_LOCAL_POINTS)):
         mask = ray_idxs == i
         if np.any(mask):
             points = intersect_points[mask]
@@ -107,8 +109,12 @@ def sample_arrangement(
     grasp_local: np.ndarray
 ):
     scene = ss.Scene()
-    scene.add_object(ss.TrimeshAsset(support_mesh), "support")
-    scene.label_support("support")
+    scene.add_object(ss.TrimeshAsset(support_mesh, origin=("centroid", "centroid", "bottom")), "support")
+    support_surfaces = scene.label_support("support", min_area=0.1)
+    if len(support_surfaces) == 0:
+        return None
+    # scene.add_object(ss.PlaneAsset(10, 10), "floor")
+    # scene.geometry["floor/geometry_0"].visual.vertex_colors = trimesh.visual.random_color()
     if not scene.place_object("annot_object", ss.TrimeshAsset(object_mesh, origin=("centroid", "centroid", "bottom")), "support"):
         return None
     for i, obj in enumerate(background_meshes):
@@ -132,28 +138,32 @@ def sample_arrangement(
     gripper_mesh.apply_transform(grasp)
     scene.add_object(ss.TrimeshAsset(gripper_mesh), "gripper")
 
+    cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
+    print("Camera FOV", cam_dfov)
+
     try:
-        rejection_sample(lambda: sample_camera_pose(scene, grasp), lambda x: x, 100)
+        rejection_sample(lambda: sample_camera_pose(scene, grasp, cam_dfov), lambda x: x, 100)
     except RejectionSampleError:
         return None
 
     return scene
     
 
-def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, support_library: MeshLibrary):
-    object_categories = list(object_library.categories())
+def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
     (category, obj_id), object_mesh = object_library.sample()
 
     print("Annot object", category, obj_id)
     annot = next(a for a in annotations if a.obj.object_category == category and a.obj.object_id == obj_id)
     N = np.random.randint(0, 10)
+    print(f"N={N}")
 
+    object_categories = list(background_library.categories())
     object_categories.remove(category)
     background_categories = np.random.choice(object_categories, size=N, replace=True)
     background_meshes = []
     for cat in background_categories:
-        background_obj_id = np.random.choice(list(object_library.objects(cat)))
-        background_meshes.append(object_library[cat, background_obj_id])
+        background_obj_id = np.random.choice(list(background_library.objects(cat)))
+        background_meshes.append(background_library[cat, background_obj_id])
 
     _, support_mesh = support_library.sample()
     print("Support", *_)
@@ -184,8 +194,9 @@ def main():
 
     object_library = MeshLibrary(annotated_instances)
     support_library = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
+    background_library = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
 
-    scene: ss.Scene = rejection_sample(lambda: sample_scene(annotations, object_library, support_library), lambda x: x is not None, 100)
+    scene: ss.Scene = rejection_sample(lambda: sample_scene(annotations, object_library, background_library, support_library), lambda x: x is not None, 100)
     scene.show()
     # TODO: generate image and depth map, then save to disk
 

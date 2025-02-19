@@ -40,7 +40,7 @@ def look_at_rot(p1: np.ndarray, p2: np.ndarray):
     y /= np.linalg.norm(y)
     return np.column_stack((x, y, z))
 
-def random_cam_params(w: int, h: int, dfov: float):
+def construct_cam_K(w: int, h: int, dfov: float):
     f = (np.hypot(w, h) / 2) / np.tan(np.radians(dfov/2))
     cam_info = np.array([
         [f, 0, w/2],
