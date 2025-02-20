@@ -1,13 +1,16 @@
 import argparse
+from collections import defaultdict
 import os
 import shutil
 import re
 import pickle
+import multiprocessing as mp
 
 import h5py
 import numpy as np
 from tqdm import tqdm
-from scipy.spatial.transform import Rotation as R
+
+from subsample_grasps import sample_grasps, load_aligned_meshes_and_grasps
 
 GRIPPER_POS_OFFSET = 0.075
 
@@ -17,69 +20,20 @@ def get_args():
     parser.add_argument("grasps_root")
     parser.add_argument("shapenet_root")
     parser.add_argument("output_dir")
-    parser.add_argument("--n-grasps", type=int, default=16)
+    parser.add_argument("--n-grasps", type=int, default=4, help="Minimum number of grasps per object instance in a category")
+    parser.add_argument("--min-grasps", type=int, default=32, help="Minimum number of grasps per category")
+    parser.add_argument("--only-sample-grasps", action="store_true", help="Only sample grasps, do not copy meshes")
     return parser.parse_args()
 
 
-def rot_distance(rot_deltas: np.ndarray):
-    return R.from_matrix(rot_deltas).magnitude()
-
-
-def grasp_dist(grasp: np.ndarray, all_grasps: np.ndarray):
-    """Distance between a grasp and a set of grasps."""
-    assert grasp.ndim == 2
-    if all_grasps.ndim == 2:
-        all_grasps = all_grasps[None]
-    grasp_pos = grasp[:3, 3] + GRIPPER_POS_OFFSET * grasp[:3, 2]
-    all_grasps_pos = all_grasps[:, :3, 3] + GRIPPER_POS_OFFSET * all_grasps[:, :3, 2]
-    pos_dist = np.linalg.norm(grasp_pos[None] - all_grasps_pos, axis=1)
-
-    rd1 = rot_distance(all_grasps[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3])
-    rd2 = rot_distance(all_grasps[:, :3, :3].transpose(0,2,1) @ grasp[None, :3, :3] @ R.from_euler("z", [np.pi]).as_matrix())
-    rot_dist = np.minimum(rd1, rd2)
-
-    return pos_dist + 0.01 * rot_dist
-
-
-def subsample_grasps(successes: np.ndarray, grasps: np.ndarray, n: int):
-    succ_grasp_idxs = np.argwhere(successes == 1).flatten()
-    grasps = grasps[succ_grasp_idxs]
-    if len(grasps) <= n:
-        return succ_grasp_idxs
-
-    points_left = np.arange(len(grasps))
-    sample_inds = np.zeros(n, dtype=int)
-    dists = np.full_like(points_left, np.inf, dtype=float)
-
-    selected = 0
-    sample_inds[0] = selected
-    points_left = np.delete(points_left, selected)
-
-    for i in range(1, n):
-        last_added_idx = sample_inds[i-1]
-        dists_to_last_added = grasp_dist(grasps[last_added_idx], grasps[points_left])
-        dists[points_left] = np.minimum(dists[points_left], dists_to_last_added)
-        selected = np.argmax(dists[points_left])
-        sample_inds[i] = points_left[selected]
-        points_left = np.delete(points_left, selected)
-    
-    return succ_grasp_idxs[sample_inds]
-
-
-def main():
-    args = get_args()
-
+def copy_assets(args):
     output_mesh_dir = os.path.join(args.output_dir, "meshes")
     output_grasp_dir = os.path.join(args.output_dir, "grasps")
     os.makedirs(output_mesh_dir, exist_ok=True)
     os.makedirs(output_grasp_dir, exist_ok=True)
 
-    # maps (category, object_id, grasp_id) -> whether the grasp is annotated
-    annotation_skeleton: dict[str, dict[str, dict[int, bool]]] = {}
-
     for grasp_filename in tqdm(os.listdir(args.grasps_root)):
-        category, obj_id = grasp_filename.split("_", 1)
-        obj_id = obj_id[:-len(".h5")]
+        category = grasp_filename.split("_", 1)[0]
         mesh_src_dir = os.path.join(args.shapenet_root, "models-OBJ", "models")
         mesh_dst_dir = os.path.join(output_mesh_dir, category)
         os.makedirs(mesh_dst_dir, exist_ok=True)
@@ -88,18 +42,10 @@ def main():
             os.path.join(args.grasps_root, grasp_filename),
             os.path.join(output_grasp_dir, grasp_filename)
         )
-        with h5py.File(os.path.join(output_grasp_dir, grasp_filename), "r+") as f:
+        with h5py.File(os.path.join(output_grasp_dir, grasp_filename), "r") as f:
             _, c, mesh_fn = f["object/file"][()].decode("utf-8").split("/")
             assert c == category
             mesh_id = mesh_fn[:-len(".obj")]
-            grasps = np.array(f["grasps/transforms"])
-            successes = np.array(f["grasps/qualities/flex/object_in_gripper"])
-            sampled_grasp_idxs = subsample_grasps(successes, grasps, args.n_grasps)
-            f["grasps/sampled_idxs"] = sampled_grasp_idxs
-
-            if category not in annotation_skeleton:
-                annotation_skeleton[category] = {}
-            annotation_skeleton[category][obj_id] = {i.item(): False for i in sampled_grasp_idxs}
         
         shutil.copy2(
             os.path.join(mesh_src_dir, f"{mesh_id}.obj"),
@@ -129,8 +75,42 @@ def main():
                 os.path.join(mesh_dst_dir, texture_file)
             )
 
+
+def subsample_grasps(args):
+    # maps (category, object_id, grasp_id) -> whether the grasp is annotated
+    annotation_skeleton: dict[str, dict[str, dict[int, bool]]] = {}
+    output_grasp_dir = os.path.join(args.output_dir, "grasps")
+
+    category_objects: dict[str, list[str]] = defaultdict(list)
+    for grasp_filename in os.listdir(output_grasp_dir):
+        category, obj_id = grasp_filename.split("_", 1)
+        obj_id = obj_id[:-len(".h5")]
+        category_objects[category].append(obj_id)
+
+    for category, obj_ids in tqdm(category_objects.items(), desc="Subsampling grasps"):
+        _, grasps, succs = load_aligned_meshes_and_grasps(category, obj_ids)
+        n_grasps = max(args.n_grasps * len(obj_ids), args.min_grasps)
+        grasp_idxs_per_obj = sample_grasps(grasps, succs, n_grasps)
+        for obj_id, grasp_idxs in zip(obj_ids, grasp_idxs_per_obj):
+            grasp_filename = f"{category}_{obj_id}.h5"
+            with h5py.File(os.path.join(output_grasp_dir, grasp_filename), "r+") as f:
+                if "grasps/sampled_idxs" in f:
+                    del f["grasps/sampled_idxs"]
+                f["grasps/sampled_idxs"] = grasp_idxs
+
+            if category not in annotation_skeleton:
+                annotation_skeleton[category] = {}
+            annotation_skeleton[category][obj_id] = {i.item(): False for i in grasp_idxs}
+
     with open(os.path.join(args.output_dir, "annotation_skeleton.pkl"), "wb") as f:
         pickle.dump(annotation_skeleton, f)
+
+def main():
+    args = get_args()
+
+    if not args.only_sample_grasps:
+        copy_assets(args)
+    subsample_grasps(args)
 
 if __name__ == "__main__":
     main()

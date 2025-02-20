@@ -3,6 +3,7 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as scipyR
+from itertools import takewhile, count
 
 from acronym_tools import load_mesh, load_grasps, create_gripper_marker
 
@@ -20,7 +21,8 @@ def cvh(mesh: trimesh.Trimesh, max_iter=5):
     for _ in range(max_iter):
         if (cvh := cvh.convex_hull).is_watertight:
             return cvh
-    raise ValueError("watertight failed")
+    print("WARN: cvh failed")
+    return mesh.bounding_primitive
 
 def icp_2d(src_mesh: trimesh.Trimesh, target_mesh: trimesh.Trimesh, N=1000, max_iterations=50, tolerance=1e-5):
     src_mesh = src_mesh.copy()
@@ -146,16 +148,15 @@ def grasp_dist(grasp: np.ndarray, all_grasps: np.ndarray):
 
     return pos_dist + 0.01 * rot_dist
 
-def load_mesh_and_grasps(category: str, obj_ids: list[str]):
+def load_aligned_meshes_and_grasps(category: str, obj_ids: list[str]):
     meshes = []
     grasps = []
-    grasp_succ_idxs = []
+    grasp_succs = []
     first_cvh: trimesh.Trimesh = None
-    for obj_id in tqdm(obj_ids):
+    for obj_id in tqdm(obj_ids, leave=False, desc=f"Aligning meshes for {category}"):
         fn = f"{category}_{obj_id}.h5"
         mesh = load_mesh(f"data/grasps/{fn}", mesh_root_dir="data")
         mesh_grasps, succ = load_grasps(f"data/grasps/{fn}")
-        succ_idxs = np.nonzero(succ)[0]
         mesh_grasps[..., :3, 3] -= mesh.centroid
         mesh.apply_translation(-mesh.centroid)
 
@@ -171,11 +172,11 @@ def load_mesh_and_grasps(category: str, obj_ids: list[str]):
 
         meshes.append(mesh)
         grasps.append(mesh_grasps)
-        grasp_succ_idxs.append(succ_idxs)
-    return meshes, grasps, grasp_succ_idxs
+        grasp_succs.append(succ)
+    return meshes, grasps, grasp_succs
 
-def sample_grasps(category: str, obj_ids: list[str], n_grasps: int) -> list[list[int]]:
-    meshes, grasps, grasp_succ_idxs = load_mesh_and_grasps(category, obj_ids)
+def sample_grasps(grasps: list[np.ndarray], grasp_succs: list[np.ndarray], n_grasps: int) -> list[list[int]]:
+    grasp_succ_idxs = [np.nonzero(succ)[0] for succ in grasp_succs]
     n_instances = len(grasps)
 
     all_grasps = np.concatenate([g[idxs] for g, idxs in zip(grasps, grasp_succ_idxs)], axis=0)
@@ -188,7 +189,8 @@ def sample_grasps(category: str, obj_ids: list[str], n_grasps: int) -> list[list
     sample_inds.append(selected)
     points_left = np.delete(points_left, selected)
 
-    for i in range(1, n_grasps):
+    # for i in range(1, n_grasps):
+    for i in takewhile(lambda _: len(sample_inds) < n_grasps and len(points_left) > 0, count(1)):
         instance_idx = i % n_instances
         last_added_idx = sample_inds[-1]
         dists_to_last_added = grasp_dist(all_grasps[last_added_idx], all_grasps[points_left])
@@ -196,11 +198,12 @@ def sample_grasps(category: str, obj_ids: list[str], n_grasps: int) -> list[list
 
         # indices in points_left that correspond to the object being considered
         eligible_points = np.argwhere(grasp_obj_idxs[points_left] == instance_idx).flatten()
+        if len(eligible_points) == 0:
+            continue
         # index of points_left being added
         selected = eligible_points[np.argmax(dists[points_left[eligible_points]])]
         sample_inds.append(points_left[selected])
         points_left = np.delete(points_left, selected)
-
 
     # maps instance index to the start index of its grasps in all_grasps
     obj_idx_cumsum = np.cumsum([0] + [len(grasp_succ_idxs[i]) for i in range(len(grasp_succ_idxs))])
@@ -222,26 +225,24 @@ def viz_obj_grasps(meshes: list[trimesh.Trimesh], grasps: list[np.ndarray], gras
     scene.show()
 
 def main():
-    category = "Mug"
+    category = "Pan"
     obj_ids = []
     for fn in os.listdir("data/grasps"):
         if fn.startswith(category + "_"):
             obj_ids.append(fn[len(category) + 1:-len(".h5")])
 
-    meshes, grasps_per_obj, grasp_succ_idxs_per_obj = load_mesh_and_grasps(category, obj_ids)
+    meshes, grasps_per_obj, grasp_succs_per_obj = load_aligned_meshes_and_grasps(category, obj_ids)
 
     print("Per-Instance Sampling")
     grasp_idxs_per_obj = []
-    for grasps, grasp_succ_idxs in zip(grasps_per_obj, grasp_succ_idxs_per_obj):
+    for grasps, succs in zip(grasps_per_obj, grasp_succs_per_obj):
         from preprocess_shapenet import subsample_grasps
-        succs = np.zeros(len(grasps), dtype=int)
-        succs[grasp_succ_idxs] = 1
         grasp_ids = subsample_grasps(succs, grasps, 2)
         grasp_idxs_per_obj.append(grasp_ids)
     viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
 
     print("Cross-Instance Sampling")
-    grasp_idxs_per_obj = sample_grasps(category, obj_ids, 2*len(obj_ids))
+    grasp_idxs_per_obj = sample_grasps(grasps_per_obj, grasp_succs_per_obj, 2*len(obj_ids))
     viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
 
 if __name__ == "__main__":
