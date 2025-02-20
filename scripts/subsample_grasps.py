@@ -10,6 +10,12 @@ from acronym_tools import load_mesh, load_grasps, create_gripper_marker
 GRIPPER_POS_OFFSET = 0.075
 
 def cvh(mesh: trimesh.Trimesh, max_iter=5):
+    """
+    Get the convex hull of a mesh.
+    Due to numerical issues, mesh.convex_hull is sometimes not watertight (despite by definition being watertight).
+    Repeatedly computing the convex hull seems to fix this.
+    see: https://github.com/mikedh/trimesh/issues/535
+    """
     cvh = mesh
     for _ in range(max_iter):
         if (cvh := cvh.convex_hull).is_watertight:
@@ -202,47 +208,41 @@ def sample_grasps(category: str, obj_ids: list[str], n_grasps: int) -> list[list
     for i in sample_inds:
         instance_idx = grasp_obj_idxs[i]
         ret[instance_idx].append(grasp_succ_idxs[instance_idx][i - obj_idx_cumsum[instance_idx]])
-
-    # TODO: remove
-    scene = trimesh.Scene()
-    for i, (m, gids) in enumerate(zip(meshes, ret)):
-        scene.add_geometry(m)
-        for grasp_id in gids:
-            gripper_marker = create_gripper_marker()
-            gripper_marker.apply_transform(grasps[i][grasp_id])
-            scene.add_geometry(gripper_marker)
-    scene.show()
-
     return ret
 
 
-def main1():
-    category = "Bowl"
-    obj_ids = []
-    for fn in os.listdir("data/grasps"):
-        if fn.startswith(category + "_"):
-            obj_ids.append(fn[len(category) + 1:-len(".h5")])
-    ret = sample_grasps(category, obj_ids, 100)
-    print(list(map(len, ret)))
-
-def main2():
-    category = "Pan"
-    obj_ids = []
-    for fn in os.listdir("data/grasps"):
-        if fn.startswith(category + "_"):
-            obj_ids.append(fn[len(category) + 1:-len(".h5")])
-
+def viz_obj_grasps(meshes: list[trimesh.Trimesh], grasps: list[np.ndarray], grasp_idxs_per_obj: list[list[int]]):
     scene = trimesh.Scene()
-    meshes, grasps, _ = load_mesh_and_grasps(category, obj_ids)
-    print(sum(map(len, grasps)))
-    scene = trimesh.Scene()
-    for i, m in enumerate(meshes):
+    for m, grasps, grasp_idxs in zip(meshes, grasps, grasp_idxs_per_obj):
         scene.add_geometry(m)
-        for grasp_id in range(len(grasps[i])):
+        for grasp_id in grasp_idxs:
             gripper_marker = create_gripper_marker()
-            gripper_marker.apply_transform(grasps[i][grasp_id])
+            gripper_marker.apply_transform(grasps[grasp_id])
             scene.add_geometry(gripper_marker)
     scene.show()
 
+def main():
+    category = "Mug"
+    obj_ids = []
+    for fn in os.listdir("data/grasps"):
+        if fn.startswith(category + "_"):
+            obj_ids.append(fn[len(category) + 1:-len(".h5")])
+
+    meshes, grasps_per_obj, grasp_succ_idxs_per_obj = load_mesh_and_grasps(category, obj_ids)
+
+    print("Per-Instance Sampling")
+    grasp_idxs_per_obj = []
+    for grasps, grasp_succ_idxs in zip(grasps_per_obj, grasp_succ_idxs_per_obj):
+        from preprocess_shapenet import subsample_grasps
+        succs = np.zeros(len(grasps), dtype=int)
+        succs[grasp_succ_idxs] = 1
+        grasp_ids = subsample_grasps(succs, grasps, 2)
+        grasp_idxs_per_obj.append(grasp_ids)
+    viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
+
+    print("Cross-Instance Sampling")
+    grasp_idxs_per_obj = sample_grasps(category, obj_ids, 2*len(obj_ids))
+    viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
+
 if __name__ == "__main__":
-    main1()
+    main()
