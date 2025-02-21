@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import trimesh
+from trimesh.path import Path2D
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as scipyR
 from itertools import takewhile, count
@@ -24,11 +25,21 @@ def cvh(mesh: trimesh.Trimesh, max_iter=5):
     print("WARN: cvh failed")
     return mesh.bounding_primitive
 
+def is_zero_measure_2d(p: Path2D):
+    return p.vertices.size == 0 or np.isclose(p.area, 0)
+
 def icp_2d(src_mesh: trimesh.Trimesh, target_mesh: trimesh.Trimesh, N=1000, max_iterations=50, tolerance=1e-5):
     src_mesh = src_mesh.copy()
     target_mesh = target_mesh.copy()
     src_mesh.fix_normals()
     target_mesh.fix_normals()
+    if not src_mesh.is_volume or not target_mesh.is_volume:
+        return np.eye(3)
+
+    src_proj = src_mesh.projected(np.array([0, 0, 1]))
+    target_proj = target_mesh.projected(np.array([0, 0, 1]))
+    if is_zero_measure_2d(src_proj) or is_zero_measure_2d(target_proj):
+        return np.eye(3)
     source_pts = src_mesh.projected(np.array([0, 0, 1])).sample(N)
     target_pts = target_mesh.projected(np.array([0, 0, 1])).sample(N)
 
@@ -185,25 +196,32 @@ def sample_grasps(grasps: list[np.ndarray], grasp_succs: list[np.ndarray], n_gra
     sample_inds = []
     dists = np.full_like(points_left, np.inf, dtype=float)
 
-    selected = 0
-    sample_inds.append(selected)
-    points_left = np.delete(points_left, selected)
-
-    # for i in range(1, n_grasps):
-    for i in takewhile(lambda _: len(sample_inds) < n_grasps and len(points_left) > 0, count(1)):
-        instance_idx = i % n_instances
-        last_added_idx = sample_inds[-1]
-        dists_to_last_added = grasp_dist(all_grasps[last_added_idx], all_grasps[points_left])
-        dists[points_left] = np.minimum(dists[points_left], dists_to_last_added)
-
-        # indices in points_left that correspond to the object being considered
-        eligible_points = np.argwhere(grasp_obj_idxs[points_left] == instance_idx).flatten()
-        if len(eligible_points) == 0:
-            continue
-        # index of points_left being added
-        selected = eligible_points[np.argmax(dists[points_left[eligible_points]])]
-        sample_inds.append(points_left[selected])
+    if n_grasps >= len(all_grasps):
+        sample_inds = np.arange(len(all_grasps))
+    else:
+        selected = 0
+        sample_inds.append(selected)
         points_left = np.delete(points_left, selected)
+
+        # for i in range(1, n_grasps):
+        with tqdm(total=n_grasps, desc="Sampling grasps", leave=False) as pbar:
+            pbar.update(1)
+            for i in takewhile(lambda _: len(sample_inds) < n_grasps, count(1)):
+                instance_idx = i % n_instances
+                # indices in points_left that correspond to the object being considered
+                eligible_points = np.argwhere(grasp_obj_idxs[points_left] == instance_idx).flatten()
+                if len(eligible_points) == 0:
+                    continue
+
+                last_added_idx = sample_inds[-1]
+                dists_to_last_added = grasp_dist(all_grasps[last_added_idx], all_grasps[points_left])
+                dists[points_left] = np.minimum(dists[points_left], dists_to_last_added)
+
+                # index of points_left being added
+                selected = eligible_points[np.argmax(dists[points_left[eligible_points]])]
+                sample_inds.append(points_left[selected])
+                points_left = np.delete(points_left, selected)
+                pbar.update(1)
 
     # maps instance index to the start index of its grasps in all_grasps
     obj_idx_cumsum = np.cumsum([0] + [len(grasp_succ_idxs[i]) for i in range(len(grasp_succ_idxs))])
@@ -233,13 +251,13 @@ def main():
 
     meshes, grasps_per_obj, grasp_succs_per_obj = load_aligned_meshes_and_grasps(category, obj_ids)
 
-    print("Per-Instance Sampling")
-    grasp_idxs_per_obj = []
-    for grasps, succs in zip(grasps_per_obj, grasp_succs_per_obj):
-        from preprocess_shapenet import subsample_grasps
-        grasp_ids = subsample_grasps(succs, grasps, 2)
-        grasp_idxs_per_obj.append(grasp_ids)
-    viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
+    # print("Per-Instance Sampling")
+    # grasp_idxs_per_obj = []
+    # for grasps, succs in zip(grasps_per_obj, grasp_succs_per_obj):
+    #     from preprocess_shapenet import subsample_grasps
+    #     grasp_ids = subsample_grasps(succs, grasps, 2)
+    #     grasp_idxs_per_obj.append(grasp_ids)
+    # viz_obj_grasps(meshes, grasps_per_obj, grasp_idxs_per_obj)
 
     print("Cross-Instance Sampling")
     grasp_idxs_per_obj = sample_grasps(grasps_per_obj, grasp_succs_per_obj, 2*len(obj_ids))
