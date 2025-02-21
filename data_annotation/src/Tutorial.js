@@ -19,6 +19,7 @@ const Tutorial = ({ onClose }) => {
             Given a 3D object and a grasp, users should input the following:
           </p>
           <ul>
+            <li>A brief description of the object</li>
             <li>A description of the grasp relative to the object</li>
             <li>Whether the mesh is malformed</li>
             <li>Whether the grasp is good, bad, or infeasible</li>
@@ -27,9 +28,25 @@ const Tutorial = ({ onClose }) => {
             If the mesh is malformed or the grasp is infeasible, users should select the corresponding options, and still provide a best-effort grasp description.
           </p>
 
+          <h3>Object Description</h3>
+          <p>
+            The <strong>Object Description</strong> should be a brief description of the object in about 10 words or less.
+            This description should be concise and descriptive, e.g. "This is a red coffee mug with white handle".
+          </p>
+
           <h3>Grasp Description</h3>
           <img src={teapot_img} alt="Teapot example" className="tutorial-image" />
-          <p>Shown this teapot, a possible description could be:</p>
+          <p>
+            The <strong>Grasp Description</strong> should be a concise and detailed explanation of the grasp's position and orientation relative to the displayed object.
+          </p>
+          <p>
+            The description should only be about the grasp, not about it's appropriateness or quality.
+            For example, do not say that the grasp is good or bad, or comment on its stability.
+            Additionally, do not describe where a better grasp would be.
+          </p>
+          <p>
+            For example, shown this teapot, a possible description could be:
+          </p>
           <blockquote>
             The grasp is on the spout of the teapot, where it connects to the body.
             The grasp is oriented parallel to the base of the teapot, and the fingers are closing on either side of the spout.

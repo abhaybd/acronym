@@ -13,6 +13,7 @@ def get_args():
     args.add_argument("--url", default="http://localhost:3000")
     args.add_argument("-p", "--prolific-code")
     args.add_argument("-o", "--output")
+    args.add_argument("--limit", type=int)
     args.add_argument("categories", nargs="+")
     return args.parse_args()
 
@@ -36,6 +37,8 @@ def main():
                     url += "&oneshot=true"
                 urls.append(url)
     random.shuffle(urls)
+    if args.limit:
+        urls = urls[:args.limit]
 
     if args.output:
         with open(args.output, "w") as f:

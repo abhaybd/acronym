@@ -102,6 +102,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                     <br />
                     <textarea
                         className="object-description-input"
+                        placeholder="This is a(n) ..."
                         value={objDescription}
                         onChange={(e) => setObjDescription(e.target.value)}
                         disabled={isDisabled}
@@ -116,6 +117,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                     <br />
                     <textarea
                         className="grasp-description-input"
+                        placeholder="The grasp is ..."
                         value={graspDescription}
                         onChange={(e) => setGraspDescription(e.target.value)}
                         disabled={isDisabled}

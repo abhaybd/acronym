@@ -113,7 +113,8 @@ def visualize_annotation(annotation: Annotation):
     print(f"\tLabel: {annotation.grasp_label}")
     print(f"\tMesh Malformed: {annotation.is_mesh_malformed}")
     print(f"\tTime taken: {annotation.time_taken:.2f} sec")
-    print(f"\tDescription: {annotation.grasp_description}")
+    print(f"\tObject Description: {annotation.obj_description}")
+    print(f"\tGrasp Description: {annotation.grasp_description}")
 
     load_object_data(annotation.obj.object_category, annotation.obj.object_id)
 
@@ -131,6 +132,7 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true", help="Plot histogram of time taken.")
     parser.add_argument("-v", "--visualize", nargs=3, metavar=("CATEGORY", "OBJ_ID", "GRASP_ID"), help="Visualize a specific observation.")
     parser.add_argument("-r", "--random-viz", action="store_true", help="Visualize a random observation.")
+    parser.add_argument("-u", "--viz-uzer", help="Visualize all annotations from a specific user.")
     args = parser.parse_args()
 
     download_annotations()
@@ -150,3 +152,8 @@ if __name__ == "__main__":
     if args.random_viz:
         annotation: Annotation = np.random.choice(annotations)
         visualize_annotation(annotation)
+
+    if args.viz_uzer:
+        for annotation in annotations:
+            if annotation.user_id == args.viz_uzer:
+                visualize_annotation(annotation)
