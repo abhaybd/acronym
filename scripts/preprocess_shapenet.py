@@ -4,10 +4,8 @@ import os
 import shutil
 import re
 import pickle
-import multiprocessing as mp
 
 import h5py
-import numpy as np
 from tqdm import tqdm
 
 from subsample_grasps import sample_grasps, load_aligned_meshes_and_grasps
@@ -20,9 +18,11 @@ def get_args():
     parser.add_argument("grasps_root")
     parser.add_argument("shapenet_root")
     parser.add_argument("output_dir")
+    parser.add_argument("--n-proc", type=int, default=16, help="Number of processes to use")
     parser.add_argument("--n-grasps", type=int, default=4, help="Minimum number of grasps per object instance in a category")
     parser.add_argument("--min-grasps", type=int, default=32, help="Minimum number of grasps per category")
     parser.add_argument("--only-sample-grasps", action="store_true", help="Only sample grasps, do not copy meshes")
+    parser.add_argument("--sampling-categories-file", help="File containing categories to resample grasps for")
     return parser.parse_args()
 
 
@@ -87,8 +87,15 @@ def subsample_grasps(args):
         obj_id = obj_id[:-len(".h5")]
         category_objects[category].append(obj_id)
 
-    for category, obj_ids in tqdm(category_objects.items(), desc="Subsampling grasps"):
-        _, grasps, succs = load_aligned_meshes_and_grasps(category, obj_ids)
+    if args.sampling_categories_file:
+        with open(args.sampling_categories_file, "r") as f:
+            sampling_categories = f.read().splitlines()
+    else:
+        sampling_categories = sorted(category_objects.keys())
+
+    for category in tqdm(sampling_categories, desc="Subsampling grasps"):
+        obj_ids = category_objects[category]
+        _, grasps, succs = load_aligned_meshes_and_grasps(category, obj_ids, args.n_proc)
         n_grasps = max(args.n_grasps * len(obj_ids), args.min_grasps)
         grasp_idxs_per_obj = sample_grasps(grasps, succs, n_grasps)
         for obj_id, grasp_idxs in zip(obj_ids, grasp_idxs_per_obj):

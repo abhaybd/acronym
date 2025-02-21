@@ -5,6 +5,8 @@ from trimesh.path import Path2D
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as scipyR
 from itertools import takewhile, count
+import multiprocessing as mp
+from multiprocessing.pool import AsyncResult
 
 from acronym_tools import load_mesh, load_grasps, create_gripper_marker
 
@@ -40,8 +42,11 @@ def icp_2d(src_mesh: trimesh.Trimesh, target_mesh: trimesh.Trimesh, N=1000, max_
     target_proj = target_mesh.projected(np.array([0, 0, 1]))
     if is_zero_measure_2d(src_proj) or is_zero_measure_2d(target_proj):
         return np.eye(3)
-    source_pts = src_mesh.projected(np.array([0, 0, 1])).sample(N)
-    target_pts = target_mesh.projected(np.array([0, 0, 1])).sample(N)
+    source_pts = src_proj.sample(N)
+    target_pts = target_proj.sample(N)
+    # sometimes the projected points are empty (weird meshes)
+    if source_pts.size == 0 or target_pts.size == 0:
+        return np.eye(3)
 
     def centroid_align(A, B):
         centroid_A = np.mean(A, axis=0)
@@ -159,31 +164,48 @@ def grasp_dist(grasp: np.ndarray, all_grasps: np.ndarray):
 
     return pos_dist + 0.01 * rot_dist
 
-def load_aligned_meshes_and_grasps(category: str, obj_ids: list[str]):
+def load_and_align(path: str, target_cvh: trimesh.Trimesh):
+    mesh = load_mesh(path, mesh_root_dir="data")
+    mesh_grasps, succ = load_grasps(path)
+    mesh_grasps[..., :3, 3] -= mesh.centroid
+    mesh.apply_translation(-mesh.centroid)
+
+    trf_2d = icp_2d(cvh(mesh), target_cvh)
+    trf = np.eye(4)
+    trf[:2, :2] = trf_2d[:2, :2]
+    trf[:2, 3] = trf_2d[:2, 2]
+    mesh.apply_transform(trf)
+    mesh_grasps = trf @ mesh_grasps
+    return mesh, mesh_grasps, succ
+
+def load_aligned_meshes_and_grasps(category: str, obj_ids: list[str], n_proc=16):
     meshes = []
     grasps = []
     grasp_succs = []
     first_cvh: trimesh.Trimesh = None
-    for obj_id in tqdm(obj_ids, leave=False, desc=f"Aligning meshes for {category}"):
-        fn = f"{category}_{obj_id}.h5"
-        mesh = load_mesh(f"data/grasps/{fn}", mesh_root_dir="data")
-        mesh_grasps, succ = load_grasps(f"data/grasps/{fn}")
-        mesh_grasps[..., :3, 3] -= mesh.centroid
-        mesh.apply_translation(-mesh.centroid)
 
-        if len(meshes) > 0:
-            trf_2d = icp_2d(cvh(mesh), first_cvh)
-            trf = np.eye(4)
-            trf[:2, :2] = trf_2d[:2, :2]
-            trf[:2, 3] = trf_2d[:2, 2]
-            mesh.apply_transform(trf)
-            mesh_grasps = trf @ mesh_grasps
-        else:
-            first_cvh = cvh(mesh)
+    with mp.Pool(processes=n_proc) as pool:
+        futures: list[AsyncResult] = []
+        for obj_id in obj_ids:
+            path = f"data/grasps/{category}_{obj_id}.h5"
 
-        meshes.append(mesh)
-        grasps.append(mesh_grasps)
-        grasp_succs.append(succ)
+            if first_cvh is not None:
+                futures.append(pool.apply_async(load_and_align, (path, first_cvh)))
+            else:
+                mesh = load_mesh(path, mesh_root_dir="data")
+                mesh_grasps, succ = load_grasps(path)
+                mesh_grasps[..., :3, 3] -= mesh.centroid
+                mesh.apply_translation(-mesh.centroid)
+                ar = AsyncResult(pool, None, None)
+                ar._set(0, (True, (mesh, mesh_grasps, succ)))
+                futures.append(ar)
+                first_cvh = cvh(mesh)
+
+        for future in tqdm(futures, leave=False, desc=f"Aligning meshes for {category}"):
+            mesh, mesh_grasps, succ = future.get()
+            meshes.append(mesh)
+            grasps.append(mesh_grasps)
+            grasp_succs.append(succ)
     return meshes, grasps, grasp_succs
 
 def sample_grasps(grasps: list[np.ndarray], grasp_succs: list[np.ndarray], n_grasps: int) -> list[list[int]]:
