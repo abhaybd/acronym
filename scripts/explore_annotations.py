@@ -113,7 +113,7 @@ def visualize_annotation(annotation: Annotation):
     print(f"\tLabel: {annotation.grasp_label}")
     print(f"\tMesh Malformed: {annotation.is_mesh_malformed}")
     print(f"\tTime taken: {annotation.time_taken:.2f} sec")
-    print(f"\tDescription: {annotation.description}")
+    print(f"\tDescription: {annotation.grasp_description}")
 
     load_object_data(annotation.obj.object_category, annotation.obj.object_id)
 

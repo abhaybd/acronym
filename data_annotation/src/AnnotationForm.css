@@ -31,7 +31,11 @@ textarea, input[type="text"] {
     border-radius: 5px;
 }
 
-textarea {
+.object-description-input {
+    height: 5em;
+}
+
+.grasp-description-input {
     height: 10em;
 }
 

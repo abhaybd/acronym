@@ -6,7 +6,8 @@ import './AnnotationForm.css';
 
 const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, prolific_code }) => {
     const navigate = useNavigate();
-    const [description, setDescription] = useState('');
+    const [objDescription, setObjDescription] = useState('');
+    const [graspDescription, setGraspDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState('');
     const [graspLabel, setGraspLabel] = useState('');
     const [startTime, setStartTime] = useState(null);
@@ -24,7 +25,8 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
     }, [prolific_code]);
 
     const resetForm = () => {
-        setDescription("");
+        setObjDescription("");
+        setGraspDescription("");
         setIsMalformed("");
         setGraspLabel("");
     };
@@ -49,7 +51,8 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
                         "object_id": object_id,
                     },
                     "grasp_id": grasp_id,
-                    "description": description,
+                    "obj_description": objDescription,
+                    "grasp_description": graspDescription,
                     "is_mesh_malformed": isMalformed === 'yes',
                     "grasp_label": graspLabel,
                     "user_id": userID,
@@ -95,11 +98,26 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
             </div>
             <div className="form-group">
                 <label>
-                    Description:
+                    Object Description (10 words or less):
                     <br />
                     <textarea
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
+                        className="object-description-input"
+                        value={objDescription}
+                        onChange={(e) => setObjDescription(e.target.value)}
+                        disabled={isDisabled}
+                        required={true}
+                        minLength={5}
+                    />
+                </label>
+            </div>
+            <div className="form-group">
+                <label>
+                    Grasp Description:
+                    <br />
+                    <textarea
+                        className="grasp-description-input"
+                        value={graspDescription}
+                        onChange={(e) => setGraspDescription(e.target.value)}
                         disabled={isDisabled}
                         required={true}
                         minLength={20}
