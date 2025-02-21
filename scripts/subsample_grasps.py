@@ -192,35 +192,33 @@ def sample_grasps(grasps: list[np.ndarray], grasp_succs: list[np.ndarray], n_gra
 
     all_grasps = np.concatenate([g[idxs] for g, idxs in zip(grasps, grasp_succ_idxs)], axis=0)
     grasp_obj_idxs = np.concatenate([np.full(len(grasp_succ_idxs[i]), i) for i in range(len(grasp_succ_idxs))], axis=0)
-    points_left = np.arange(len(all_grasps))
+    points_left_mask = np.ones(len(all_grasps), dtype=bool)
     sample_inds = []
-    dists = np.full_like(points_left, np.inf, dtype=float)
+    dists = np.full(len(all_grasps), np.inf, dtype=float)
 
     if n_grasps >= len(all_grasps):
         sample_inds = np.arange(len(all_grasps))
     else:
         selected = 0
         sample_inds.append(selected)
-        points_left = np.delete(points_left, selected)
+        points_left_mask[selected] = False
 
-        # for i in range(1, n_grasps):
         with tqdm(total=n_grasps, desc="Sampling grasps", leave=False) as pbar:
             pbar.update(1)
             for i in takewhile(lambda _: len(sample_inds) < n_grasps, count(1)):
                 instance_idx = i % n_instances
-                # indices in points_left that correspond to the object being considered
-                eligible_points = np.argwhere(grasp_obj_idxs[points_left] == instance_idx).flatten()
-                if len(eligible_points) == 0:
+                eligible_points_mask = (grasp_obj_idxs == instance_idx) & points_left_mask
+                if not eligible_points_mask.any():
                     continue
 
                 last_added_idx = sample_inds[-1]
-                dists_to_last_added = grasp_dist(all_grasps[last_added_idx], all_grasps[points_left])
-                dists[points_left] = np.minimum(dists[points_left], dists_to_last_added)
+                dists_to_last_added = grasp_dist(all_grasps[last_added_idx], all_grasps[points_left_mask])
+                dists[points_left_mask] = np.minimum(dists[points_left_mask], dists_to_last_added)
 
-                # index of points_left being added
-                selected = eligible_points[np.argmax(dists[points_left[eligible_points]])]
-                sample_inds.append(points_left[selected])
-                points_left = np.delete(points_left, selected)
+                eligible_dists = np.where(eligible_points_mask, dists, -np.inf)
+                selected = np.argmax(eligible_dists)
+                sample_inds.append(selected)
+                points_left_mask[selected] = False
                 pbar.update(1)
 
     # maps instance index to the start index of its grasps in all_grasps
@@ -248,6 +246,7 @@ def main():
     for fn in os.listdir("data/grasps"):
         if fn.startswith(category + "_"):
             obj_ids.append(fn[len(category) + 1:-len(".h5")])
+    obj_ids.sort()
 
     meshes, grasps_per_obj, grasp_succs_per_obj = load_aligned_meshes_and_grasps(category, obj_ids)
 
