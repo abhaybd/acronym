@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import './AnnotationForm.css';
 
-const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, prolific_code }) => {
+const AnnotationForm = ({ category, object_id, grasp_id, onSubmit, prolific_code }) => {
     const navigate = useNavigate();
     const [objDescription, setObjDescription] = useState('');
     const [graspDescription, setGraspDescription] = useState('');
@@ -69,14 +69,9 @@ const AnnotationForm = ({ category, object_id, grasp_id, fetchMesh, oneshot, pro
             console.error('Error:', error);
             alert('An error occurred while submitting the annotation');
         }
-        if (!oneshot) {
-            resetForm();
-            await fetchMesh();
-        } else if (prolific_code) {
-            window.location.href = `https://app.prolific.com/submissions/complete?cc=${prolific_code}`;
-        } else {
-            navigate('/done', { replace: true });
-        }
+
+        resetForm();
+        await onSubmit();
     };
 
     const isDisabled = !category || !object_id || grasp_id == null;

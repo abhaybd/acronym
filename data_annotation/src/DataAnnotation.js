@@ -6,12 +6,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import AnnotationForm from './AnnotationForm';
 import Tutorial from './Tutorial';
+import ProgressBar from './ProgressBar';
 import './DataAnnotation.css';
 
 const DataAnnotation = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [meshURL, setMeshURL] = useState(null);
+  const [annotSchedule, setAnnotSchedule] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const orbitRef = useRef();
@@ -28,9 +29,25 @@ const DataAnnotation = () => {
     }
   }, []);
 
+  const encodeStr = (str) => {
+    return encodeURIComponent(btoa(str));
+  };
+
+  const decodeStr = (str) => {
+    return atob(decodeURIComponent(str));
+  };
+
+  const navigateToSchedule = (schedule) => {
+    searchParams.set("annotation_schedule", encodeStr(JSON.stringify(schedule)));
+    console.log(searchParams.get("annotation_schedule"), JSON.stringify(schedule));
+    navigate({
+      pathname: "/",
+      search: searchParams.toString()
+    }, {replace: true});
+  };
+
   const fetchObjectInfo = async () => {
     setLoading(true);
-    setMeshURL(null);
     const response = await fetch('/api/get-object-info', {
       method: 'POST'
     });
@@ -44,24 +61,40 @@ const DataAnnotation = () => {
       navigate('/done', { replace: true });
     } else {
       const data = await response.json();
-      navigate({
-        pathname: "/",
-        search: createSearchParams(data).toString()
-      }, {replace: true});
+      const schedule = {
+        idx: 0,
+        annotations: [data]
+      };
+      navigateToSchedule(schedule);
     }
   };
 
+  /*
+  Schedule looks like:
+  {
+    idx: int,
+    annotations: [
+      {
+        object_category: str,
+        object_id: str,
+        grasp_id: int
+      },
+      ...
+    ]
+  }
+  */
+
   useEffect(() => {
-    if (searchParams.has("object_category") &&
-        searchParams.has("object_id") &&
-        searchParams.has("grasp_id")) {
+    if (searchParams.has("annotation_schedule")) {
       setLoading(true);
-      setMeshURL(`/api/get-mesh-data/${searchParams.get("object_category")}/${searchParams.get("object_id")}/${searchParams.get("grasp_id")}`);
-    } else if (searchParams.has("object_category") ||
-          searchParams.has("object_id") ||
-          searchParams.has("grasp_id")) {
-        alert("Invalid search parameters! Need all of object_category, object_id, and grasp_id.");
+      const schedule = JSON.parse(decodeStr(searchParams.get("annotation_schedule")));
+      const idx = schedule.idx;
+      if (idx >= schedule.annotations.length || idx < 0) {
+        alert("Invalid schedule index!");
+        return;
       }
+      setAnnotSchedule(schedule);
+    }
   }, [searchParams]);
 
   const GLTFMesh = ({ meshURL }) => {
@@ -78,6 +111,28 @@ const DataAnnotation = () => {
 
   const oneshot = searchParams.get('oneshot') === 'true' || searchParams.has("prolific_code");
 
+  const onFormSubmit = async () => {
+    if (annotSchedule.idx + 1 == annotSchedule.annotations.length) {
+      if (!oneshot) {
+        await fetchObjectInfo();
+      } else if (searchParams.has("prolific_code")) {
+        window.location.href = `https://app.prolific.com/submissions/complete?cc=${searchParams.get("prolific_code")}`;
+      } else {
+        navigate('/done', { replace: true });
+      }
+    } else {
+      const newSchedule = { ...annotSchedule, idx: annotSchedule.idx + 1 };
+      navigateToSchedule(newSchedule);
+    }
+  };
+
+  const annotInfo = annotSchedule ? annotSchedule.annotations[annotSchedule.idx] : null;
+
+  const getProgress = () => {
+    if (!annotSchedule) return { completed: 0, total: 0 };
+    return { completed: annotSchedule.idx, total: annotSchedule.annotations.length };
+  };
+
   return (
     <div className="data-annotation-container">
       <div className="button-container">
@@ -86,17 +141,24 @@ const DataAnnotation = () => {
         </button>
         <button className="ai2-button" onClick={() => setShowTutorial(true)}>Show Tutorial</button>
       </div>
+      {annotSchedule && annotSchedule.annotations.length > 1 && (
+        <div className="progress-container">
+          <span>{annotSchedule.idx}/{annotSchedule.annotations.length}</span>
+          <ProgressBar completed={annotSchedule.idx} total={annotSchedule.annotations.length} />
+        </div>
+      )}
+
       <div className={`content-container ${showTutorial ? 'dimmed' : ''}`}>
         <div className="canvas-container-toolbar">
           <div className="canvas-container">
             {loading && <div className="spinner"></div>}
-            {meshURL && (
+            {annotInfo && (
               <Canvas camera={{ position: [0, 0.4, 0.6], near: 0.05, far: 20, fov: 45 }}>
                 <Suspense fallback={null}>
                   <Environment preset="sunset" />
                   <OrbitControls ref={orbitRef} />
                   <GLTFMesh
-                    meshURL={meshURL}
+                    meshURL={`/api/get-mesh-data/${annotInfo.object_category}/${annotInfo.object_id}/${annotInfo.grasp_id}`}
                   />
                 </Suspense>
               </Canvas>
@@ -108,11 +170,10 @@ const DataAnnotation = () => {
           </div>
         </div>
         <AnnotationForm
-          category={searchParams.get("object_category")}
-          object_id={searchParams.get('object_id')}
-          grasp_id={searchParams.get('grasp_id')}
-          fetchMesh={fetchObjectInfo}
-          oneshot={oneshot}
+          category={annotInfo?.object_category}
+          object_id={annotInfo?.object_id}
+          grasp_id={annotInfo?.grasp_id}
+          onSubmit={onFormSubmit}
           prolific_code={searchParams.get('prolific_code')}
         />
       </div>

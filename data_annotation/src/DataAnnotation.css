@@ -13,6 +13,10 @@
     margin-bottom: 20px;
 }
 
+.progress-container {
+    width: 100%;
+}
+
 .ai2-button {
     background-color: #ff69b4; /* pink */
     color: white;
