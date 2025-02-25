@@ -15,6 +15,9 @@ from annotation import Annotation, GraspLabel
 class RejectionSampleError(Exception):
     pass
 
+def not_none(x: Any):
+    return x is not None
+
 def rejection_sample(sampler_fn: Callable[[], Any], condition_fn: Callable[[Any], bool], max_iters: int = 1000):
     for _ in range(max_iters):
         sample = sampler_fn()
@@ -101,10 +104,14 @@ class MeshLibrary(object):
     def objects(self, category: str):
         return self.library[category]
 
-    def sample(self):
-        category = np.random.choice(list(self.library.keys()))
-        obj_id = np.random.choice(list(self.library[category]))
-        return (category, obj_id), self[category, obj_id]
+    def sample(self, n_categories: int | None = None, replace=False):
+        ret_keys, ret_meshes = [], []
+        categories = np.random.choice(list(self.library.keys()), size=n_categories or 1, replace=replace)
+        for category in categories:
+            obj_id = np.random.choice(list(self.library[category]))
+            ret_keys.append((category, obj_id))
+            ret_meshes.append(self[category, obj_id])
+        return (ret_keys, ret_meshes) if n_categories else (ret_keys[0], ret_meshes[0])
 
     def _load_mesh(self, category: str, obj_id: str, center: bool = True):
         fn = f"data/grasps/{category}_{obj_id}.h5"

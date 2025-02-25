@@ -4,34 +4,29 @@ import numpy as np
 import trimesh
 from pydantic import BaseModel
 
-from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError
+from utils import load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
 from annotation import Annotation
 
 from acronym_tools import create_gripper_marker
 
 import scene_synthesizer as ss
+from scene_synthesizer.utils import PositionIteratorUniform
 
 
 class DatagenConfig(BaseModel):
     cam_dfov_range: tuple[float, float] = (60.0, 90.0)  # degrees
-    cam_dist_range: tuple[float, float] = (1.0, 1.5)  # meters
-    cam_pitch_perturb: float = 0.2  # fraction of YFOV
-    cam_yaw_perturb: float = 0.3  # fraction of XFOV
+    cam_dist_range: tuple[float, float] = (0.7, 1.3)  # meters
+    cam_pitch_perturb: float = 0.02  # fraction of YFOV
+    cam_yaw_perturb: float = 0.05  # fraction of XFOV
     cam_roll_perturb: float = np.pi/8  # radians
     img_size: tuple[int, int] = (480, 640)  # (height, width)
-    cam_elevation_range: tuple[float, float] = (0, np.pi/3)  # radians
+    cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
+    n_views: int = 10
 
 datagen_cfg = DatagenConfig()  # TODO load from disk
 
 SUPPORT_CATEGORIES = [
-    # "1Shelves",
-    # "2Shelves",
-    # "3Shelves",
-    # "4Shelves",
-    # "5Shelves",
-    # "6Shelves",
-    # "7Shelves",
-    "Bookcase",
+    # "Bookcase",
     "Table"
 ]
 
@@ -45,17 +40,27 @@ GRASP_LOCAL_POINTS = np.array([
     [-0.041, 0, 0.066]
 ])
 
-def sample_camera_pose(
-    scene: ss.Scene,
-    grasp_pose: np.ndarray,
-    cam_dfov: float
-):
+def point_on_support(scene: ss.Scene):
+    surfaces = scene.support_generator(sampling_fn=lambda x: x)
+    weights = [s.polygon.area for s in surfaces]
+    weights = np.array(weights) / np.sum(weights)
+    surface = surfaces[np.random.choice(len(surfaces), p=weights)]
+
+    it = PositionIteratorUniform()
+    x, y = next(it(surface))[0]
+
+    obj_pose = scene.get_transform(surface.node_name)
+    return obj_pose[:-1] @ surface.transform @ np.array([x, y, 0, 1])
+
+def sample_camera_pose(scene: ss.Scene, cam_dfov: float):
     img_h, img_w = datagen_cfg.img_size
+    # TODO: perturb principal point
     cam_params = construct_cam_K(img_w, img_h, cam_dfov)
     cam_xfov = 2 * np.arctan(img_w / (2 * cam_params[0, 0]))
     cam_yfov = 2 * np.arctan(img_h / (2 * cam_params[1, 1]))
 
-    grasp_pos = grasp_pose[:-1] @ np.concatenate([GRASP_LOCAL_POINTS[2], [1]])
+    lookat_pos = point_on_support(scene)
+    # scene.add_object(ss.SphereAsset(0.02), translation=lookat_pos)
 
     cam_dist = np.random.uniform(*datagen_cfg.cam_dist_range)
     inclination = np.pi/2 - np.random.uniform(*datagen_cfg.cam_elevation_range)
@@ -65,116 +70,64 @@ def sample_camera_pose(
         cam_dist * np.sin(inclination) * np.cos(azimuth),
         cam_dist * np.sin(inclination) * np.sin(azimuth),
         cam_dist * np.cos(inclination)
-    ]) + grasp_pos
+    ]) + lookat_pos
     cam_pose[:3, :3] = \
-        look_at_rot(cam_pose[:3, 3], grasp_pos) @ \
+        look_at_rot(cam_pose[:3, 3], lookat_pos) @ \
         random_delta_rot(
             datagen_cfg.cam_roll_perturb,
             datagen_cfg.cam_pitch_perturb * np.radians(cam_yfov),
             datagen_cfg.cam_yaw_perturb * np.radians(cam_xfov)
         )
-    scene.scene.camera_transform = cam_pose
-    scene.scene.camera.K = cam_params
+    return cam_params, cam_pose
 
-    camera_collider = trimesh.primitives.Sphere(radius=0.05)
-    if scene.in_collision_single(camera_collider, cam_pose):
-        return False
-
-    grasp_points = np.concatenate([GRASP_LOCAL_POINTS, np.ones((len(GRASP_LOCAL_POINTS), 1))], axis=1) @ grasp_pose[:-1].T
-    ray_origins = np.tile(cam_pose[:3, 3], (len(grasp_points), 1))
-    ray_directions = grasp_points - ray_origins
-    ray_directions /= np.linalg.norm(ray_directions, axis=1, keepdims=True)
-
-    scene_mesh: trimesh.Trimesh = scene.scene.to_mesh()
-    intersect_points, ray_idxs, _ = scene_mesh.ray.intersects_location(ray_origins, ray_directions)
-    n_visible = 0
-    visible_idxs = []
-    for i in range(len(GRASP_LOCAL_POINTS)):
-        mask = ray_idxs == i
-        if np.any(mask):
-            points = intersect_points[mask]
-            closest_idx = np.argmin(np.linalg.norm(points - ray_origins[i], axis=1))
-            if np.linalg.norm(points[closest_idx] - grasp_points[i]) < 0.005:
-                n_visible += 1
-                visible_idxs.append(i)
-
-    print("Visible", n_visible, visible_idxs)
-
-    return n_visible >= 3
 
 def sample_arrangement(
-    object_mesh: trimesh.Trimesh,
+    object_meshes: list[trimesh.Trimesh],
     background_meshes: list[trimesh.Trimesh],
-    support_mesh: trimesh.Trimesh,
-    grasp_local: np.ndarray
+    support_mesh: trimesh.Trimesh
 ):
     scene = ss.Scene()
     scene.add_object(ss.TrimeshAsset(support_mesh, origin=("centroid", "centroid", "bottom")), "support")
-    support_surfaces = scene.label_support("support", min_area=0.1)
+    support_surfaces = scene.label_support("support", min_area=0.05)
     if len(support_surfaces) == 0:
         return None
-    # scene.add_object(ss.PlaneAsset(10, 10), "floor")
-    # scene.geometry["floor/geometry_0"].visual.vertex_colors = trimesh.visual.random_color()
-    if not scene.place_object("annot_object", ss.TrimeshAsset(object_mesh, origin=("centroid", "centroid", "bottom")), "support"):
+
+    scene.add_object(ss.PlaneAsset(20, 20), "floor")
+    scene.geometry["floor/geometry_0"].visual.vertex_colors = [0, 0, 0, 255]
+
+    objs_placed = 0
+    for i, obj in enumerate(object_meshes):
+        asset = ss.TrimeshAsset(obj, origin=("centroid", "centroid", "bottom"))
+        objs_placed += scene.place_object(f"object_{i}", asset, "support")
+    if objs_placed <= 1:
         return None
     for i, obj in enumerate(background_meshes):
         asset = ss.TrimeshAsset(obj, origin=("centroid", "centroid", "bottom"))
         scene.place_object(f"background_{i}", asset, "support")
 
-    # grasp is in the mesh centroid frame, so we need to go mesh centroid frame -> mesh frame -> world frame
-    annot_obj_geom_names = scene.get_geometry_names("annot_object")
-    assert len(annot_obj_geom_names) == 1
-    obj_centroid_local = scene.get_centroid(annot_obj_geom_names[0], "annot_object")
-    grasp_local = grasp_local.copy()
-    grasp_local[:3, 3] += obj_centroid_local
-    obj_transform = scene.get_transform("annot_object")
-    grasp = obj_transform @ grasp_local
-
-    gripper_collision_mesh = trimesh.load("data/franka_gripper_collision_mesh.stl")
-    if scene.in_collision_single(gripper_collision_mesh, grasp):
-        return None
-
-    gripper_mesh: trimesh.Trimesh = create_gripper_marker()
-    gripper_mesh.apply_transform(grasp)
-    scene.add_object(ss.TrimeshAsset(gripper_mesh), "gripper")
-
-    cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
-    print("Camera FOV", cam_dfov)
-
+    cam_params: list[tuple[np.ndarray, np.ndarray]] = []
     try:
-        rejection_sample(lambda: sample_camera_pose(scene, grasp, cam_dfov), lambda x: x, 100)
+        for i in range(datagen_cfg.n_views):
+            cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
+            params = rejection_sample(lambda: sample_camera_pose(scene, cam_dfov), not_none, 100)
+            cam_params.append(params)
     except RejectionSampleError:
         return None
 
-    return scene
-    
+    return scene, cam_params
 
-def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
-    (category, obj_id), object_mesh = object_library.sample()
+def sample_scene(object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
+    n_objects = np.random.randint(2, min(6, len(object_library.categories())))
+    n_background = np.random.randint(3, min(10, len(background_library.categories())))
 
-    print("Annot object", category, obj_id)
-    annot = next(a for a in annotations if a.obj.object_category == category and a.obj.object_id == obj_id)
-    N = np.random.randint(0, 10)
-    print(f"N={N}")
-
-    object_categories = list(background_library.categories())
-    object_categories.remove(category)
-    background_categories = np.random.choice(object_categories, size=N, replace=True)
-    background_meshes = []
-    for cat in background_categories:
-        background_obj_id = np.random.choice(list(background_library.objects(cat)))
-        background_meshes.append(background_library[cat, background_obj_id])
-
-    _, support_mesh = support_library.sample()
-    print("Support", *_)
-
-    grasps_local, _ = object_library.grasps(category, obj_id)
-    grasp_local = grasps_local[annot.grasp_id]
+    object_keys, object_meshes = object_library.sample(n_objects)
+    background_keys, background_meshes = background_library.sample(n_background, replace=True)
+    support_key, support_mesh = support_library.sample()
 
     try:
         return rejection_sample(
-            lambda: sample_arrangement(object_mesh, background_meshes, support_mesh, grasp_local),
-            lambda x: x is not None,
+            lambda: sample_arrangement(object_meshes, background_meshes, support_mesh),
+            not_none,
             10
         )
     except RejectionSampleError:
@@ -196,9 +149,15 @@ def main():
     support_library = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
     background_library = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
 
-    scene: ss.Scene = rejection_sample(lambda: sample_scene(annotations, object_library, background_library, support_library), lambda x: x is not None, 100)
+    scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), lambda x: x is not None, 100)
+    scene: ss.Scene
+    scene.export("scene.glb")
+    # for cam_K, cam_pose in cam_params:
+    #     scene.scene.camera.K = cam_K
+    #     scene.scene.camera_transform = cam_pose
     scene.show()
-    # TODO: generate image and depth map, then save to disk
+
+    # TODO: for each view, find all visible annotations
 
 if __name__ == "__main__":
     main()

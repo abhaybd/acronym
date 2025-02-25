@@ -123,7 +123,10 @@ def visualize_annotation(annotation: Annotation):
     gripper_marker.apply_translation(-scene.centroid)
     scene.apply_translation(-scene.centroid)
     scene.add_geometry(gripper_marker)
-    scene.to_mesh().show()
+    try:
+        scene.to_mesh().show()
+    except AttributeError:
+        pass
 
 if __name__ == "__main__":
     import argparse
