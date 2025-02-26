@@ -25,6 +25,19 @@ def rejection_sample(sampler_fn: Callable[[], Any], condition_fn: Callable[[Any]
             return sample
     raise RejectionSampleError("Failed to sample")
 
+def kelvin_to_rgb(kelvin: float):
+    # taken from: https://tannerhelland.com/2012/09/18/convert-temperature-rgb-algorithm-code.html
+    temp = kelvin / 100
+    if temp <= 66:
+        r = 255
+        g = np.clip(99.4708025861 * np.log(temp) - 161.1195681661, 0, 255)
+        b = np.clip(138.5177312231 * np.log(temp - 10) - 305.0447927307, 0, 255) if temp > 19 else 0
+    else:
+        r = np.clip(329.698727446 * np.power(temp - 60, -0.1332047592), 0, 255)
+        g = np.clip(288.1221695283 * np.power(temp - 60, -0.0755148492), 0, 255)
+        b = 255
+    return np.array([r, g, b])
+
 def load_annotation(path: str):
     with open(path) as f:
         data = json.load(f)
@@ -105,7 +118,8 @@ class MeshLibrary(object):
         return self.library[category]
 
     def sample(self, n_categories: int | None = None, replace=False):
-        ret_keys, ret_meshes = [], []
+        ret_keys: list[tuple[str, str]] = []
+        ret_meshes: list[trimesh.Trimesh] = []
         categories = np.random.choice(list(self.library.keys()), size=n_categories or 1, replace=replace)
         for category in categories:
             obj_id = np.random.choice(list(self.library[category]))
