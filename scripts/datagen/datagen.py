@@ -1,10 +1,16 @@
+import json
 import os
 from tqdm import tqdm
 import numpy as np
 import trimesh
+import trimesh.exchange
+import trimesh.exchange.export
+import trimesh.exchange.gltf
+import trimesh.exchange.ply
 from trimesh.scene.lighting import DirectionalLight
 from pydantic import BaseModel
 from itertools import compress
+import base64
 
 from utils import kelvin_to_rgb, load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
 from annotation import Annotation
@@ -25,9 +31,8 @@ class DatagenConfig(BaseModel):
     cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
     n_views: int = 10
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
-    light_intensity_range: tuple[float, float] = (500, 1000)  # lux
-    light_azimuth_range: tuple[float, float] = (0, 2 * np.pi)  # radians
-    light_inclination_range: tuple[float, float] = (0, np.pi/3)  # radians
+    light_intensity_range: tuple[float, float] = (100, 200)  # candela
+    light_altitude_range: tuple[float, float] = (0.5, 0.7)  # fraction of wall height
 
 datagen_cfg = DatagenConfig()  # TODO load from disk
 
@@ -52,23 +57,27 @@ def homogenize(arr: np.ndarray):
     else:
         return np.concatenate([arr, np.ones((len(arr), 1))], axis=-1)
 
-def set_dressing(scene: ss.Scene):
-    scene.add_walls(["x", "-x", "y", "-y"], overhang=2.0)
-
+def generate_lighting(scene: ss.Scene) -> list[dict]:
     light_temp = np.random.uniform(*datagen_cfg.color_temp_range)
     light_intensity = np.random.uniform(*datagen_cfg.light_intensity_range)
-    light_inclination = np.random.uniform(*datagen_cfg.light_inclination_range)
-    light_azimuth = np.random.uniform(*datagen_cfg.light_azimuth_range)
+    light_altitude = np.random.uniform(*datagen_cfg.light_altitude_range)
     light_trf = np.eye(4)
-    light_z_ax = np.array([
-        np.cos(light_azimuth) * np.sin(light_inclination),
-        np.sin(light_azimuth) * np.sin(light_inclination),
-        np.cos(light_inclination)
-    ])
-    light_trf[:3, :3] = look_at_rot(light_z_ax, np.zeros(3))
-    scene.scene.lights = [DirectionalLight(name="light", color=kelvin_to_rgb(light_temp), intensity=light_intensity)]
-    # TODO switch to point light somewhere over floor?
-    scene.scene.graph["light"] = light_trf
+    floor_bounds = scene.get_bounds("floor.*")
+    wall_bounds = scene.get_bounds("wall.*")
+    light_trf[:2, 3] = np.random.uniform(floor_bounds[0, :2], floor_bounds[1, :2])
+    light_trf[2, 3] = light_altitude * wall_bounds[1, 2]
+    lights = [
+        {
+            "type": "PointLight",
+            "args": {
+                "name": "light",
+                "color": kelvin_to_rgb(light_temp).tolist(),
+                "intensity": light_intensity,
+            },
+            "transform": light_trf.tolist()
+        }
+    ]
+    return lights
 
 def on_screen_annotations(cam_K: np.ndarray, cam_pose: np.ndarray, grasps: np.ndarray):
     # grasps is (N, 4, 4) poses in scene frame
@@ -288,19 +297,26 @@ def main():
     background_library = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
 
     scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
-    set_dressing(scene)
-
-    import time
-    start = time.perf_counter()
-    obs_arr = generate_obs(scene, cam_params, object_library, annotations)
-    print(f"Time taken (coll first, cache): {time.perf_counter() - start} seconds")
-
     scene: ss.Scene
-    # scene.scene.show(smooth=False)
+    scene.add_walls(["x", "-x", "y", "-y"], overhang=2.0)
 
-    import pyrender
-    py_scene = pyrender.Scene.from_trimesh_scene(scene.scene)
-    viewer = pyrender.Viewer(py_scene, use_raymond_lighting=False, shadows=True, use_direct_lighting=True)
+    # obs_arr = generate_obs(scene, cam_params, object_library, annotations)
+    lighting = generate_lighting(scene)
+
+
+    glb_bytes: bytes = scene.export(file_type="glb")
+
+    scene.show()
+
+    for i, (cam_K, cam_pose) in enumerate(cam_params):
+        data = {
+            "cam_K": cam_K.tolist(),
+            "cam_pose": cam_pose.tolist(),
+            "lighting": lighting,
+            "glb": base64.b64encode(glb_bytes).decode("utf-8")
+        }
+        with open(f"tmp/scene_{i}.json", "w") as f:
+            json.dump(data, f)
 
 if __name__ == "__main__":
     main()
