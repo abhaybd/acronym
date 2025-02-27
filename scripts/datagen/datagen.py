@@ -7,7 +7,6 @@ import trimesh.exchange
 import trimesh.exchange.export
 import trimesh.exchange.gltf
 import trimesh.exchange.ply
-from trimesh.scene.lighting import DirectionalLight
 from pydantic import BaseModel
 from itertools import compress
 import base64
@@ -31,8 +30,9 @@ class DatagenConfig(BaseModel):
     cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
     n_views: int = 10
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
-    light_intensity_range: tuple[float, float] = (100, 200)  # candela
-    light_altitude_range: tuple[float, float] = (0.5, 0.7)  # fraction of wall height
+    light_intensity_range: tuple[float, float] = (10, 40)  # lux
+    light_azimuth_range: tuple[float, float] = (0, 2 * np.pi)  # radians
+    light_inclination_range: tuple[float, float] = (0, np.pi/3)  # radians
 
 datagen_cfg = DatagenConfig()  # TODO load from disk
 
@@ -60,15 +60,18 @@ def homogenize(arr: np.ndarray):
 def generate_lighting(scene: ss.Scene) -> list[dict]:
     light_temp = np.random.uniform(*datagen_cfg.color_temp_range)
     light_intensity = np.random.uniform(*datagen_cfg.light_intensity_range)
-    light_altitude = np.random.uniform(*datagen_cfg.light_altitude_range)
+    light_azimuth = np.random.uniform(*datagen_cfg.light_azimuth_range)
+    light_inclination = np.random.uniform(*datagen_cfg.light_inclination_range)
     light_trf = np.eye(4)
-    floor_bounds = scene.get_bounds("floor.*")
-    wall_bounds = scene.get_bounds("wall.*")
-    light_trf[:2, 3] = np.random.uniform(floor_bounds[0, :2], floor_bounds[1, :2])
-    light_trf[2, 3] = light_altitude * wall_bounds[1, 2]
+    light_direction = np.array([
+        np.cos(light_azimuth) * np.cos(light_inclination),
+        np.sin(light_azimuth) * np.cos(light_inclination),
+        np.sin(light_inclination)
+    ])  # opposite of direction light is pointing
+    light_trf[:3, :3] = look_at_rot(light_direction, np.zeros(3))
     lights = [
         {
-            "type": "PointLight",
+            "type": "DirectionalLight",
             "args": {
                 "name": "light",
                 "color": kelvin_to_rgb(light_temp).tolist(),
@@ -158,7 +161,6 @@ def point_on_support(scene: ss.Scene):
 
 def sample_camera_pose(scene: ss.Scene, cam_dfov: float):
     img_h, img_w = datagen_cfg.img_size
-    # TODO: perturb principal point
     cam_params = construct_cam_K(img_w, img_h, cam_dfov)
     cam_xfov = 2 * np.arctan(img_w / (2 * cam_params[0, 0]))
     cam_yfov = 2 * np.arctan(img_h / (2 * cam_params[1, 1]))
@@ -298,7 +300,8 @@ def main():
 
     scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
     scene: ss.Scene
-    scene.add_walls(["x", "-x", "y", "-y"], overhang=2.0)
+    # TODO convert walls to planes and texture them
+    scene.add_walls(["x", "-x", "y", "-y"], overhang=0.5)
 
     # obs_arr = generate_obs(scene, cam_params, object_library, annotations)
     lighting = generate_lighting(scene)
@@ -306,7 +309,10 @@ def main():
 
     glb_bytes: bytes = scene.export(file_type="glb")
 
-    scene.show()
+    try:
+        scene.show()
+    except:
+        pass
 
     for i, (cam_K, cam_pose) in enumerate(cam_params):
         data = {
