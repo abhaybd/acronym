@@ -114,7 +114,7 @@ def submit_job(openai: OpenAI, s3: S3Client, overwrite: bool, src_prefix: str, d
     annot_pfxs = list(compress(annot_pfxs, prefiltered_mask))
     annots = list(compress(annots, prefiltered_mask))
 
-    print(f"Yield after prefiltering: {len(annot_pfxs)}/{n_unfiltered} ({100*len(annot_pfxs) / n_unfiltered:.0%}%)")
+    print(f"Prefiltering yield: {len(annot_pfxs)}/{n_unfiltered} ({len(annot_pfxs) / n_unfiltered:.0%})")
 
     batch_file = BytesIO()
     for pfx, annot in zip(annot_pfxs, annots):
@@ -170,9 +170,9 @@ def retrieve_job(openai: OpenAI, s3: S3Client, batch_id: str, batch_file_id: str
         annot_file.seek(0)
         s3.upload_fileobj(annot_file, BUCKET_NAME, f"{dst_prefix}{pfx}")
 
-    n_unfiltered = len(list_s3_files(s3, BUCKET_NAME, src_prefix))
-    print(f"Annotation yield: {len(valid_annot_pfxs)}/{n_unfiltered} ({100*len(valid_annot_pfxs) / n_unfiltered:.0f}%)")
-    print(f"After revisions: {len(revisions)+len(valid_annot_pfxs)}/{n_unfiltered} ({100*(len(revisions)+len(valid_annot_pfxs)) / n_unfiltered:.0f}%)")
+    n_unfiltered = len(batch_file_lines)
+    print(f"Filtering yield: {len(valid_annot_pfxs)}/{n_unfiltered} ({len(valid_annot_pfxs) / n_unfiltered:.0%})")
+    print(f"After revisions: {len(revisions)+len(valid_annot_pfxs)}/{n_unfiltered} ({(len(revisions)+len(valid_annot_pfxs)) / n_unfiltered:.0%})")
 
     if batch_file_id:
         openai.files.delete(batch_file_id)

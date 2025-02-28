@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 from tqdm import tqdm
 import numpy as np
 import trimesh
@@ -31,6 +32,8 @@ class DatagenConfig(BaseModel):
     img_size: tuple[int, int] = (480, 640)  # (height, width)
     cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
     n_views: int = 10
+    n_objects_range: tuple[int, int] = (4, 6)
+    n_background_range: tuple[int, int] = (4, 6)
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
     light_intensity_range: tuple[float, float] = (10, 40)  # lux
     light_azimuth_range: tuple[float, float] = (0, 2 * np.pi)  # radians
@@ -125,10 +128,10 @@ def generate_lighting(scene: ss.Scene) -> list[dict]:
             "type": "DirectionalLight",
             "args": {
                 "name": "light",
-                "color": kelvin_to_rgb(light_temp).tolist(),
+                "color": kelvin_to_rgb(light_temp),
                 "intensity": light_intensity,
             },
-            "transform": light_trf.tolist()
+            "transform": light_trf
         }
     ]
     return lights
@@ -272,8 +275,8 @@ def sample_arrangement(
     return scene, cam_params
 
 def sample_scene(object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
-    n_objects = np.random.randint(2, min(6, len(object_library.categories())))
-    n_background = np.random.randint(3, min(10, len(background_library.categories())))
+    n_objects = min(np.random.randint(*datagen_cfg.n_objects_range), len(object_library.categories()))
+    n_background = min(np.random.randint(*datagen_cfg.n_background_range), len(background_library.categories()))
 
     object_keys, object_meshes = object_library.sample(n_objects)
     background_keys, background_meshes = background_library.sample(n_background, replace=True)
@@ -288,7 +291,12 @@ def sample_scene(object_library: MeshLibrary, background_library: MeshLibrary, s
     except RejectionSampleError:
         return None
 
-def generate_obs(scene: ss.Scene, cam_params: list[tuple[np.ndarray, np.ndarray]], object_library: MeshLibrary, annotations: list[Annotation]):
+def generate_obs(scene: ss.Scene, views: list[tuple[np.ndarray, np.ndarray]], object_library: MeshLibrary, annotations: list[Annotation]):
+    """
+    Returns:
+        all_annotations: dict[str, tuple[Annotation, np.ndarray]]  # annotation_id -> (annotation, grasp)
+        annots_per_view: list[list[str]]  # annotation_id list for each view
+    """
     grasps_dict: dict[tuple[str, str], np.ndarray] = {}  # maps object in scene to its grasps
     for name in scene.get_object_names():
         assert isinstance(name, str)
@@ -313,8 +321,11 @@ def generate_obs(scene: ss.Scene, cam_params: list[tuple[np.ndarray, np.ndarray]
 
     annotation_grasps = np.array(annotation_grasps)
     collision_cache: dict[tuple[str, str], bool] = {}  # (category, id) -> is colliding
+    print(f"Before filtering: {len(annotation_grasps)}")
 
-    for cam_K, cam_pose in cam_params:
+    all_annotations: dict[str, tuple[Annotation, np.ndarray]] = {}  # annotation_id -> (annotation, grasp)
+    annots_per_view: list[list[str]] = []
+    for cam_K, cam_pose in views:
         in_view_annots = in_scene_annotations
         in_view_grasps = annotation_grasps
         for mask_fn in [
@@ -322,14 +333,21 @@ def generate_obs(scene: ss.Scene, cam_params: list[tuple[np.ndarray, np.ndarray]
             lambda grasps: noncolliding_annotations(scene, in_scene_annotations, grasps, collision_cache),
             lambda grasps: visible_annotations(scene, cam_pose, grasps)
         ]:
+            # TODO: also filter out grasps that are too far from the camera
             mask = mask_fn(in_view_grasps)
             in_view_annots = list(compress(in_view_annots, mask))
             in_view_grasps = in_view_grasps[mask]
             if not np.any(mask):
                 break
+        annots_in_view = []
+        for annot, grasp in zip(in_view_annots, in_view_grasps):
+            annot_id = f"{annot.obj.object_category}_{annot.obj.object_id}_{annot.grasp_id}"
+            all_annotations[annot_id] = (annot, grasp)
+            annots_in_view.append(annot_id)
+        print(f"Number of annotations in view: {len(annots_in_view)}")
+        annots_per_view.append(annots_in_view)
 
-        # TODO: collect which annotations are visible in which scene, and figure out some export format??
-
+    return all_annotations, annots_per_view
 
 def main():
     annotations: list[Annotation] = []
@@ -349,9 +367,9 @@ def main():
     scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
     scene: ss.Scene
     generate_floor_and_walls(scene)
-
-    # obs_arr = generate_obs(scene, cam_params, object_library, annotations)
     lighting = generate_lighting(scene)
+
+    all_annotations, annots_per_view = generate_obs(scene, cam_params, object_library, annotations)
 
 
     glb_bytes: bytes = scene.export(file_type="glb")
@@ -361,15 +379,31 @@ def main():
     except:
         pass
 
-    for i, (cam_K, cam_pose) in enumerate(cam_params):
-        data = {
-            "cam_K": cam_K.tolist(),
-            "cam_pose": cam_pose.tolist(),
-            "lighting": lighting,
-            "glb": base64.b64encode(glb_bytes).decode("utf-8")
-        }
-        with open(f"tmp/scene_{i}.json", "w") as f:
-            json.dump(data, f)
+    data = {
+        "annotations": all_annotations,
+        "views": [],
+        "lighting": lighting,
+        "glb": base64.b64encode(glb_bytes).decode("utf-8")
+    }
+    for (cam_K, cam_pose), annots in zip(cam_params, annots_per_view):
+        data["views"].append({
+            "cam_K": cam_K,
+            "cam_pose": cam_pose,
+            "annotations_in_view": annots
+        })
+
+    with open("tmp/scene.pkl", "wb") as f:
+        pickle.dump(data, f)
+
+    # for i, (cam_K, cam_pose) in enumerate(cam_params):
+    #     data = {
+    #         "cam_K": cam_K.tolist(),
+    #         "cam_pose": cam_pose.tolist(),
+    #         "lighting": lighting,
+    #         "glb": base64.b64encode(glb_bytes).decode("utf-8")
+    #     }
+    #     with open(f"tmp/scene_{i}.json", "w") as f:
+    #         json.dump(data, f)
 
 if __name__ == "__main__":
     main()
