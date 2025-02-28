@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import io
 import boto3
@@ -8,8 +9,13 @@ import json
 
 import pickle
 
+from types_boto3_s3 import S3Client
+
+from scripts.utils import list_s3_files
+
 BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
+FILTERED_ANNOT_PREFIX = "semantic-grasping/annotations-filtered/"
 
 def get_args():
     args = argparse.ArgumentParser()
@@ -21,6 +27,15 @@ def get_args():
     args.add_argument("categories", nargs="+")
     return args.parse_args()
 
+def completed_annotations(s3: S3Client):
+    ret: set[tuple[str, str, int]] = set()
+    keys = list_s3_files(s3, BUCKET_NAME, FILTERED_ANNOT_PREFIX)
+    for key in keys:
+        filename = os.path.basename(key)[:-len(".json")]
+        object_category, object_id, grasp_id, _ = filename.split("__")
+        ret.add((object_category, object_id, grasp_id))
+    return ret
+
 def main():
     args = get_args()
 
@@ -30,10 +45,14 @@ def main():
     skeleton_bytes.seek(0)
     skeleton: dict[str, dict[str, dict[int, bool]]] = pickle.load(skeleton_bytes)
 
+    completed = completed_annotations(s3)
+
     params = []
     for category in args.categories:
         for obj_id, grasps in skeleton[category].items():
             for grasp_id in grasps:
+                if (category, obj_id, grasp_id) in completed:
+                    continue
                 p = {
                     "object_category": category,
                     "object_id": obj_id,

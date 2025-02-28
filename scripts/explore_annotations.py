@@ -16,17 +16,15 @@ from annotation import Annotation, GraspLabel
 s3 = boto3.client("s3")
 BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
-ANNOTATION_PREFIX = "semantic-grasping/annotations/"
-LOCAL_ANNOTATION_DIR = "annotations/"
 
-def download_annotations():
-    if not os.path.exists(LOCAL_ANNOTATION_DIR):
-        os.makedirs(LOCAL_ANNOTATION_DIR)
+def download_annotations(local_dir: str, annotation_prefix: str):
+    if not os.path.exists(local_dir):
+        os.makedirs(local_dir)
 
     files_to_download = []
     continuation_token = None
     while True:
-        list_kwargs = {"Bucket": BUCKET_NAME, "Prefix": ANNOTATION_PREFIX}
+        list_kwargs = {"Bucket": BUCKET_NAME, "Prefix": annotation_prefix}
         if continuation_token:
             list_kwargs["ContinuationToken"] = continuation_token
         response = s3.list_objects_v2(**list_kwargs)
@@ -35,7 +33,7 @@ def download_annotations():
             for obj in response["Contents"]:
                 key = obj["Key"]
                 if key.endswith(".json"):
-                    local_path = os.path.join(LOCAL_ANNOTATION_DIR, os.path.basename(key))
+                    local_path = os.path.join(local_dir, os.path.basename(key))
                     if not os.path.exists(local_path):
                         files_to_download.append((key, local_path))
 
@@ -47,11 +45,11 @@ def download_annotations():
     for key, local_path in tqdm(files_to_download, desc="Downloading annotations", disable=len(files_to_download) == 0):
         s3.download_file(BUCKET_NAME, key, local_path)
 
-def process_annotations():
+def process_annotations(local_dir: str):
     annotations = []
-    for filename in os.listdir(LOCAL_ANNOTATION_DIR):
+    for filename in os.listdir(local_dir):
         if filename.endswith(".json"):
-            with open(os.path.join(LOCAL_ANNOTATION_DIR, filename), "r") as f:
+            with open(os.path.join(local_dir, filename), "r") as f:
                 data = json.load(f)
                 if "is_grasp_invalid" in data:
                     data["grasp_label"] = GraspLabel.INFEASIBLE if data["is_grasp_invalid"] else GraspLabel.BAD
@@ -136,11 +134,16 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--visualize", nargs=3, metavar=("CATEGORY", "OBJ_ID", "GRASP_ID"), help="Visualize a specific observation.")
     parser.add_argument("-r", "--random-viz", action="store_true", help="Visualize a random observation.")
     parser.add_argument("-u", "--viz-uzer", help="Visualize all annotations from a specific user.")
+    parser.add_argument("--filtered", action="store_true", help="Use filtered annotations.")
+    parser.add_argument("--user-hist", action="store_true")
     args = parser.parse_args()
 
-    download_annotations()
+    local_dir = "annotations_filtered" if args.filtered else "annotations"
+    prefix = "semantic-grasping/annotations-filtered" if args.filtered else "semantic-grasping/annotations"
 
-    annotations = process_annotations()
+    download_annotations(local_dir, prefix)
+
+    annotations = process_annotations(local_dir)
 
     print(f"Loaded {len(annotations)} annotations.")
 
@@ -160,3 +163,13 @@ if __name__ == "__main__":
         for annotation in annotations:
             if annotation.user_id == args.viz_uzer:
                 visualize_annotation(annotation)
+
+    if args.user_hist:
+        user_hist = {}
+        for annotation in annotations:
+            user_hist[annotation.user_id] = user_hist.get(annotation.user_id, 0) + 1
+        users = [user for user in user_hist.keys() if user_hist[user] > 1]
+        plt.bar(users, [user_hist[user] for user in users])
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout(pad=0)
+        plt.show()
