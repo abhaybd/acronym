@@ -3,13 +3,12 @@ import os
 from tqdm import tqdm
 import numpy as np
 import trimesh
-import trimesh.exchange
-import trimesh.exchange.export
-import trimesh.exchange.gltf
-import trimesh.exchange.ply
+from trimesh import transformations as tra
 from pydantic import BaseModel
 from itertools import compress
 import base64
+
+from PIL import Image, ImageColor
 
 from utils import kelvin_to_rgb, load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
 from annotation import Annotation
@@ -21,6 +20,9 @@ from scene_synthesizer.utils import PositionIteratorUniform
 
 
 class DatagenConfig(BaseModel):
+    min_wall_dist: float = 2.0
+    room_width_range: tuple[float, float] = (4.0, 10.0)  # meters
+    room_depth_range: tuple[float, float] = (4.0, 10.0)  # meters
     cam_dfov_range: tuple[float, float] = (60.0, 90.0)  # degrees
     cam_dist_range: tuple[float, float] = (0.7, 1.3)  # meters
     cam_pitch_perturb: float = 0.02  # fraction of YFOV
@@ -56,6 +58,55 @@ def homogenize(arr: np.ndarray):
         return np.concatenate([arr, np.ones(1)])
     else:
         return np.concatenate([arr, np.ones((len(arr), 1))], axis=-1)
+
+def create_plane(width: float, depth: float, center: np.ndarray, normal: np.ndarray):
+    corners = [
+        (-width / 2.0, -depth / 2.0, 0),
+        (width / 2.0, -depth / 2.0, 0),
+        (-width / 2.0, depth / 2.0, 0),
+        (width / 2.0, depth / 2.0, 0),
+    ]
+    transform = trimesh.geometry.align_vectors((0, 0, 1), normal)
+    transform[:3, 3] = center
+    vertices = tra.transform_points(corners, transform)
+    faces = [[0, 1, 3, 2]]
+    plane = trimesh.Trimesh(vertices=vertices, faces=faces)
+    return plane
+
+def generate_floor_and_walls(scene: ss.Scene):
+    scene_bounds = scene.get_bounds()
+    min_width, min_depth = scene_bounds[1, :2] - scene_bounds[0, :2] + datagen_cfg.min_wall_dist
+    width = max(min_width, np.random.uniform(*datagen_cfg.room_width_range))
+    depth = max(min_depth, np.random.uniform(*datagen_cfg.room_depth_range))
+
+    center_lo = scene_bounds[1,:2] - np.array([width, depth])/2
+    center_hi = scene_bounds[0,:2] + np.array([width, depth])/2
+    center = np.append(np.random.uniform(center_lo, center_hi), 0)
+    print(center)
+
+    floor_plane = create_plane(width+0.2, depth+0.2, center, (0, 0, 1))
+    uv = np.array([[0,0], [1,0], [0,1], [1,1]]) * np.array([width, depth])
+    texture = Image.open(f"data/floor_textures_large/{np.random.choice(os.listdir('data/floor_textures_large'))}")
+    floor_plane.visual = trimesh.visual.TextureVisuals(
+        uv=uv,
+        image=texture
+    )
+    scene.add_object(ss.TrimeshAsset(floor_plane), "floor")
+
+    wall_height = scene_bounds[1, 2] + 2.0
+    with open("data/wall_colors.json", "r") as f:
+        wall_color = ImageColor.getrgb(np.random.choice(json.load(f)))
+    if len(wall_color) == 3:
+        wall_color = (*wall_color, 255)
+
+    def make_wall(sidelength, center, normal, name):
+        plane = create_plane(wall_height, sidelength, center, normal)
+        plane.visual.vertex_colors = wall_color
+        scene.add_object(ss.TrimeshAsset(plane), name)
+    make_wall(depth, center + np.array([-width/2, 0, wall_height/2]), (1, 0, 0), "x_pos_wall")
+    make_wall(depth, center + np.array([width/2, 0, wall_height/2]), (-1, 0, 0), "x_neg_wall")
+    make_wall(width, center + np.array([0, -depth/2, wall_height/2]), (0, 1, 0), "y_pos_wall")
+    make_wall(width, center + np.array([0, depth/2, wall_height/2]), (0, -1, 0), "y_neg_wall")
 
 def generate_lighting(scene: ss.Scene) -> list[dict]:
     light_temp = np.random.uniform(*datagen_cfg.color_temp_range)
@@ -199,9 +250,6 @@ def sample_arrangement(
     if len(support_surfaces) == 0:
         return None
 
-    scene.add_object(ss.PlaneAsset(5, 5), "floor")
-    scene.geometry["floor/geometry_0"].visual.vertex_colors = [0, 0, 0, 255]
-
     objs_placed = 0
     for (category, obj_id), obj in zip(object_keys, object_meshes):
         asset = ss.TrimeshAsset(obj, origin=("centroid", "centroid", "bottom"))
@@ -300,8 +348,7 @@ def main():
 
     scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
     scene: ss.Scene
-    # TODO convert walls to planes and texture them
-    scene.add_walls(["x", "-x", "y", "-y"], overhang=0.5)
+    generate_floor_and_walls(scene)
 
     # obs_arr = generate_obs(scene, cam_params, object_library, annotations)
     lighting = generate_lighting(scene)
