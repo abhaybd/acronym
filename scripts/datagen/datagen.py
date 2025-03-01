@@ -1,5 +1,5 @@
 import argparse
-from concurrent.futures import ProcessPoolExecutor, Future
+from concurrent.futures import ProcessPoolExecutor, Future, as_completed
 import json
 import os
 import pickle
@@ -28,23 +28,24 @@ class DatagenConfig(BaseModel):
     min_wall_dist: float = 2.0
     room_width_range: tuple[float, float] = (4.0, 10.0)  # meters
     room_depth_range: tuple[float, float] = (4.0, 10.0)  # meters
+
     cam_dfov_range: tuple[float, float] = (60.0, 90.0)  # degrees
     cam_dist_range: tuple[float, float] = (0.7, 1.3)  # meters
     cam_pitch_perturb: float = 0.02  # fraction of YFOV
     cam_yaw_perturb: float = 0.05  # fraction of XFOV
     cam_roll_perturb: float = np.pi/8  # radians
-    img_size: tuple[int, int] = (480, 640)  # (height, width)
     cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
+    img_size: tuple[int, int] = (480, 640)  # (height, width)
+
     n_views: int = 10
     min_annots_per_view: int = 1
     n_objects_range: tuple[int, int] = (4, 6)
     n_background_range: tuple[int, int] = (4, 6)
+
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
     light_intensity_range: tuple[float, float] = (10, 40)  # lux
     light_azimuth_range: tuple[float, float] = (0, 2 * np.pi)  # radians
     light_inclination_range: tuple[float, float] = (0, np.pi/3)  # radians
-
-datagen_cfg = DatagenConfig()  # TODO load from disk
 
 SUPPORT_CATEGORIES = [
     # "Bookcase",
@@ -81,7 +82,7 @@ def create_plane(width: float, depth: float, center: np.ndarray, normal: np.ndar
     plane = trimesh.Trimesh(vertices=vertices, faces=faces)
     return plane
 
-def generate_floor_and_walls(scene: ss.Scene):
+def generate_floor_and_walls(scene: ss.Scene, datagen_cfg: DatagenConfig):
     scene_bounds = scene.get_bounds()
     min_width, min_depth = scene_bounds[1, :2] - scene_bounds[0, :2] + datagen_cfg.min_wall_dist
     width = max(min_width, np.random.uniform(*datagen_cfg.room_width_range))
@@ -115,7 +116,7 @@ def generate_floor_and_walls(scene: ss.Scene):
     make_wall(width, center + np.array([0, -depth/2, wall_height/2]), (0, 1, 0), "y_pos_wall")
     make_wall(width, center + np.array([0, depth/2, wall_height/2]), (0, -1, 0), "y_neg_wall")
 
-def generate_lighting(scene: ss.Scene) -> list[dict]:
+def generate_lighting(scene: ss.Scene, datagen_cfg: DatagenConfig) -> list[dict]:
     light_temp = np.random.uniform(*datagen_cfg.color_temp_range)
     light_intensity = np.random.uniform(*datagen_cfg.light_intensity_range)
     light_azimuth = np.random.uniform(*datagen_cfg.light_azimuth_range)
@@ -140,7 +141,7 @@ def generate_lighting(scene: ss.Scene) -> list[dict]:
     ]
     return lights
 
-def on_screen_annotations(cam_K: np.ndarray, cam_pose: np.ndarray, grasps: np.ndarray):
+def on_screen_annotations(datagen_cfg: DatagenConfig, cam_K: np.ndarray, cam_pose: np.ndarray, grasps: np.ndarray):
     # grasps is (N, 4, 4) poses in scene frame
     trf = np.eye(4)
     trf[[1,2], [1,2]] = -1  # flip y and z axes, since for trimesh camera -z is forward
@@ -219,6 +220,7 @@ def point_on_support(scene: ss.Scene):
 
 def sample_camera_pose(
     scene: ss.Scene,
+    datagen_cfg: DatagenConfig,
     cam_dfov: float,
     in_scene_annotations: list[Annotation],
     annotation_grasps: np.ndarray,
@@ -248,7 +250,7 @@ def sample_camera_pose(
             datagen_cfg.cam_yaw_perturb * np.radians(cam_xfov)
         )
 
-    in_view_annots, in_view_grasps = get_annotations_in_view(scene, cam_K, cam_pose, in_scene_annotations, annotation_grasps, collision_cache)
+    in_view_annots, in_view_grasps = get_annotations_in_view(scene, datagen_cfg, cam_K, cam_pose, in_scene_annotations, annotation_grasps, collision_cache)
     if len(in_view_annots) < datagen_cfg.min_annots_per_view:
         return None
 
@@ -256,6 +258,7 @@ def sample_camera_pose(
 
 
 def sample_arrangement(
+    datagen_cfg: DatagenConfig,
     object_keys: list[tuple[str, str]],
     object_meshes: list[trimesh.Trimesh],
     background_meshes: list[trimesh.Trimesh],
@@ -265,11 +268,12 @@ def sample_arrangement(
 ):
     scene = ss.Scene()
     scene.add_object(ss.TrimeshAsset(support_mesh, origin=("centroid", "centroid", "bottom")), "support")
-    support_surfaces = scene.label_support("support", min_area=0.05)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        support_surfaces = scene.label_support("support", min_area=0.05)
     if len(support_surfaces) == 0:
         return None
 
-    generate_floor_and_walls(scene)
+    generate_floor_and_walls(scene, datagen_cfg)
 
     objs_placed = 0
     for (category, obj_id), obj in zip(object_keys, object_meshes):
@@ -314,7 +318,7 @@ def sample_arrangement(
         for i in range(datagen_cfg.n_views):
             cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
             cam_K, cam_pose, in_view_annots, in_view_grasps = rejection_sample(
-                lambda: sample_camera_pose(scene, cam_dfov, in_scene_annotations, annotation_grasps, collision_cache),
+                lambda: sample_camera_pose(scene, datagen_cfg, cam_dfov, in_scene_annotations, annotation_grasps, collision_cache),
                 not_none,
                 100
             )
@@ -329,7 +333,7 @@ def sample_arrangement(
 
     return scene, views, annots_in_scene, annots_per_view
 
-def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
+def sample_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
     n_objects = min(np.random.randint(*datagen_cfg.n_objects_range), len(object_library.categories()))
     n_background = min(np.random.randint(*datagen_cfg.n_background_range), len(background_library.categories()))
 
@@ -339,7 +343,7 @@ def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, bac
 
     try:
         return rejection_sample(
-            lambda: sample_arrangement(object_keys, object_meshes, background_meshes, support_mesh, object_library, annotations),
+            lambda: sample_arrangement(datagen_cfg, object_keys, object_meshes, background_meshes, support_mesh, object_library, annotations),
             not_none,
             10
         )
@@ -348,6 +352,7 @@ def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, bac
 
 def get_annotations_in_view(
     scene: ss.Scene,
+    datagen_cfg: DatagenConfig,
     cam_K: np.ndarray,
     cam_pose: np.ndarray,
     in_scene_annotations: list[Annotation],
@@ -362,7 +367,7 @@ def get_annotations_in_view(
     in_view_annots = in_scene_annotations
     in_view_grasps = annotation_grasps
     for mask_fn in [
-        lambda grasps: on_screen_annotations(cam_K, cam_pose, grasps),
+        lambda grasps: on_screen_annotations(datagen_cfg, cam_K, cam_pose, grasps),
         lambda grasps: noncolliding_annotations(scene, in_scene_annotations, grasps, collision_cache),
         lambda grasps: visible_annotations(scene, cam_pose, grasps)
     ]:
@@ -375,13 +380,13 @@ def get_annotations_in_view(
     
     return in_view_annots, in_view_grasps
 
-def generate_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
+def generate_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
     scene, views, annots_in_scene, annots_per_view = rejection_sample(
-        lambda: sample_scene(annotations, object_library, background_library, support_library),
+        lambda: sample_scene(datagen_cfg, annotations, object_library, background_library, support_library),
         not_none,
         100
     )
-    lighting = generate_lighting(scene)
+    lighting = generate_lighting(scene, datagen_cfg)
 
     glb_bytes: bytes = scene.export(file_type="glb")
 
@@ -424,8 +429,9 @@ def procgen_init():
         os._exit(-1)
     threading.Thread(target=exit_if_orphaned, daemon=True).start()
 
-def procgen_worker(out_dir: str):
+def procgen_worker(datagen_cfg: DatagenConfig, out_dir: str):
     data = generate_scene(
+        datagen_cfg,
         globals()["annotations"],
         globals()["object_library"],
         globals()["background_library"],
@@ -437,13 +443,19 @@ def procgen_worker(out_dir: str):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n-proc", type=int, help="Number of processes, if unspecified uses all available cores")
+    parser.add_argument("config", type=str, help="Path to config file")
     parser.add_argument("n_samples", type=int, help="Number of samples to generate")
     parser.add_argument("out_dir", type=str, help="Output directory")
+    parser.add_argument("--n-proc", type=int, help="Number of processes, if unspecified uses all available cores")
     return parser.parse_args()
 
 def main():
     args = get_args()
+
+    with open(args.config, "r") as f:
+        datagen_cfg = DatagenConfig.model_validate_json(f.read())
+
+    os.makedirs(args.out_dir, exist_ok=True)
 
     nproc = args.n_proc or os.cpu_count()
     with ProcessPoolExecutor(max_workers=nproc, initializer=procgen_init) as executor:
@@ -452,14 +464,17 @@ def main():
             for _ in range(args.n_samples):
                 n_running = sum(f.running() for f in futures)
                 if n_running < 4 * nproc:
-                    futures.append(executor.submit(procgen_worker, args.out_dir))
+                    futures.append(executor.submit(procgen_worker, datagen_cfg, args.out_dir))
+                else:
+                    time.sleep(0.5)
 
                 new_futures = [f for f in futures if not f.done()]
                 if len(new_futures) < len(futures):
                     pbar.update(len(futures) - len(new_futures))
                     futures = new_futures
-                time.sleep(0.5)
-
+            if len(futures) > 0:
+                for _ in as_completed(futures):
+                    pbar.update(1)
 
 def main_test():
     annotations: list[Annotation] = []
@@ -477,7 +492,9 @@ def main_test():
     background_categories = [cat for cat in ALL_OBJECT_CATEGORIES if cat not in annotated_instances]
     background_library = MeshLibrary.from_categories(background_categories)
 
-    data = generate_scene(annotations, object_library, background_library, support_library)
+    datagen_cfg = DatagenConfig()
+
+    data = generate_scene(datagen_cfg, annotations, object_library, background_library, support_library)
     with open("tmp/scene.pkl", "wb") as f:
         pickle.dump(data, f)
 
