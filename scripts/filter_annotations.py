@@ -168,7 +168,8 @@ def retrieve_job(openai: OpenAI, s3: S3Client, batch_id: str, batch_file_id: str
         annot = annot.model_copy(update={"grasp_description": revised_desc})
         annot_file = BytesIO(annot.model_dump_json().encode("utf-8"))
         annot_file.seek(0)
-        s3.upload_fileobj(annot_file, BUCKET_NAME, f"{dst_prefix}{pfx}")
+        bn = os.path.basename(pfx)
+        s3.upload_fileobj(annot_file, BUCKET_NAME, f"{dst_prefix}{bn}")
 
     n_unfiltered = len(batch_file_lines)
     print(f"Filtering yield: {len(valid_annot_pfxs)}/{n_unfiltered} ({len(valid_annot_pfxs) / n_unfiltered:.0%})")
