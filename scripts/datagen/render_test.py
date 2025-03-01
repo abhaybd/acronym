@@ -12,7 +12,7 @@ import io
 from PIL import Image
 import pyrender.light
 
-import utils
+import datagen_utils
 from annotation import Annotation
 
 

@@ -1,10 +1,12 @@
 import argparse
 from concurrent.futures import ProcessPoolExecutor, Future, as_completed
+import io
 import json
 import os
 import pickle
 import time
 import uuid
+import boto3
 from tqdm import tqdm
 import numpy as np
 import trimesh
@@ -15,14 +17,17 @@ import base64
 
 from PIL import Image, ImageColor
 
-from utils import kelvin_to_rgb, load_annotation, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
+from datagen_utils import kelvin_to_rgb, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
 from annotation import Annotation
+from utils import list_s3_files
 
 from acronym_tools import create_gripper_marker
 
 import scene_synthesizer as ss
 from scene_synthesizer.utils import PositionIteratorUniform
 
+
+ANNOTATIONS_DIR = "annotations_filtered"
 
 class DatagenConfig(BaseModel):
     min_wall_dist: float = 2.0
@@ -406,8 +411,9 @@ def generate_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], ob
 
 def procgen_init():
     annotations: list[Annotation] = []
-    for annot_fn in os.listdir("annotations"):  # TODO: load from s3
-        annotations.append(load_annotation(f"annotations/{annot_fn}"))
+    for annot_fn in os.listdir(ANNOTATIONS_DIR):
+        with open(f"{ANNOTATIONS_DIR}/{annot_fn}", "r") as f:
+            annotations.append(Annotation.model_validate_json(f.read()))
 
     annotated_instances: dict[str, set[str]] = {}
     for annot in annotations:
@@ -452,6 +458,20 @@ def get_args():
 def main():
     args = get_args()
 
+    s3 = boto3.client("s3")
+    annot_files = list_s3_files(s3, "prior-datasets", "semantic-grasping/annotations-filtered/")
+    if os.path.isdir(ANNOTATIONS_DIR):
+        annot_files_set = set(annot_files)
+        existing_annots = set(f"semantic-grasping/annotations-filtered/{fn}" for fn in os.listdir(ANNOTATIONS_DIR) if fn.endswith(".json"))
+        for annot_file in existing_annots:
+            assert annot_file in annot_files_set, f"Annotation doesn't exist in server: {annot_file}"
+        annot_files = [annot_file for annot_file in annot_files if annot_file not in existing_annots]
+    else:
+        os.makedirs(ANNOTATIONS_DIR, exist_ok=True)
+    for annot_file in tqdm(annot_files, desc="Downloading annotations"):
+        s3.download_file("prior-datasets", annot_file, f"{ANNOTATIONS_DIR}/{os.path.basename(annot_file)}")
+
+
     with open(args.config, "r") as f:
         datagen_cfg = DatagenConfig.model_validate_json(f.read())
 
@@ -478,8 +498,9 @@ def main():
 
 def main_test():
     annotations: list[Annotation] = []
-    for annot_fn in tqdm(os.listdir("annotations"), desc="Loading annotations"):
-        annotations.append(load_annotation(f"annotations/{annot_fn}"))
+    for annot_fn in tqdm(os.listdir(ANNOTATIONS_DIR), desc="Loading annotations"):
+        with open(f"{ANNOTATIONS_DIR}/{annot_fn}", "r") as f:
+            annotations.append(Annotation.model_validate_json(f.read()))
 
     annotated_instances: dict[str, set[str]] = {}
     for annot in annotations:
@@ -499,5 +520,5 @@ def main_test():
         pickle.dump(data, f)
 
 if __name__ == "__main__":
-    # main()
-    main_test()
+    main()
+    # main_test()
