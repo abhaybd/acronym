@@ -18,6 +18,7 @@ def get_args():
     parser.add_argument("grasps_root")
     parser.add_argument("shapenet_root")
     parser.add_argument("output_dir")
+    parser.add_argument("--blacklist", help="File containing object assets to blacklist")
     parser.add_argument("--n-proc", type=int, default=16, help="Number of processes to use")
     parser.add_argument("--n-grasps", type=int, default=4, help="Minimum number of grasps per object instance in a category")
     parser.add_argument("--min-grasps", type=int, default=32, help="Minimum number of grasps per category")
@@ -32,7 +33,15 @@ def copy_assets(args):
     os.makedirs(output_mesh_dir, exist_ok=True)
     os.makedirs(output_grasp_dir, exist_ok=True)
 
+    if args.blacklist:
+        with open(args.blacklist, "r") as f:
+            blacklist = set(f.read().strip().splitlines())
+    else:
+        blacklist = set()
+
     for grasp_filename in tqdm(os.listdir(args.grasps_root)):
+        if grasp_filename[:-len(".h5")] in blacklist:
+            continue
         category = grasp_filename.split("_", 1)[0]
         mesh_src_dir = os.path.join(args.shapenet_root, "models-OBJ", "models")
         mesh_dst_dir = os.path.join(output_mesh_dir, category)
