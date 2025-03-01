@@ -46,6 +46,7 @@ class DatagenConfig(BaseModel):
     min_annots_per_view: int = 1
     n_objects_range: tuple[int, int] = (4, 6)
     n_background_range: tuple[int, int] = (4, 6)
+    max_grasp_dist: float = 2.0  # meters
 
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
     light_intensity_range: tuple[float, float] = (10, 40)  # lux
@@ -155,6 +156,8 @@ def on_screen_annotations(datagen_cfg: DatagenConfig, cam_K: np.ndarray, cam_pos
     grasp_points_img = grasp_points_cam_frame @ cam_K.T
     grasp_points_img = grasp_points_img[..., :2] / grasp_points_img[..., 2:]
 
+    close_mask = np.linalg.norm(grasps_cam_frame[:, :3, 3], axis=-1) <= datagen_cfg.max_grasp_dist
+
     in_front_mask = np.all(grasp_points_cam_frame[..., 2] > 0, axis=-1)
 
     img_h, img_w = datagen_cfg.img_size
@@ -163,7 +166,7 @@ def on_screen_annotations(datagen_cfg: DatagenConfig, cam_K: np.ndarray, cam_pos
         (grasp_points_img[..., 1] >= 0) & \
         (grasp_points_img[..., 1] < img_h), axis=-1)
 
-    return in_front_mask & in_bounds_mask
+    return close_mask & in_front_mask & in_bounds_mask
 
 def visible_annotations(scene: ss.Scene, cam_pose: np.ndarray, grasps: np.ndarray):
     # grasps is (N, 4, 4) poses in scene frame
@@ -376,7 +379,6 @@ def get_annotations_in_view(
         lambda grasps: noncolliding_annotations(scene, in_scene_annotations, grasps, collision_cache),
         lambda grasps: visible_annotations(scene, cam_pose, grasps)
     ]:
-        # TODO: also filter out grasps that are too far from the camera
         mask = mask_fn(in_view_grasps)
         in_view_annots = list(compress(in_view_annots, mask))
         in_view_grasps = in_view_grasps[mask]
