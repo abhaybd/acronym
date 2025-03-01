@@ -11,7 +11,7 @@ import pickle
 
 from types_boto3_s3 import S3Client
 
-from scripts.utils import list_s3_files
+from utils import list_s3_files
 
 BUCKET_NAME = "prior-datasets"
 DATA_PREFIX = "semantic-grasping/acronym/"
