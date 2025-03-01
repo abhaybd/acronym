@@ -5,12 +5,21 @@ from functools import lru_cache
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import trimesh
+from multiprocessing import Event
 
 from acronym_tools import load_mesh, load_grasps
 
 import sys; sys.path.append("./scripts")
 from annotation import Annotation, GraspLabel
 
+
+exit_event = Event()
+
+def set_exit_event():
+    exit_event.set()
+
+def should_exit():
+    return exit_event.is_set()
 
 class RejectionSampleError(Exception):
     pass
@@ -22,6 +31,8 @@ U = TypeVar("U")
 
 def rejection_sample(sampler_fn: Callable[[], U], condition_fn: Callable[[U], bool], max_iters: int = 1000) -> U:
     for _ in range(max_iters):
+        if should_exit():
+            raise KeyboardInterrupt()
         sample = sampler_fn()
         if condition_fn(sample):
             return sample

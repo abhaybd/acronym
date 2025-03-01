@@ -17,7 +17,17 @@ import base64
 
 from PIL import Image, ImageColor
 
-from datagen_utils import kelvin_to_rgb, MeshLibrary, look_at_rot, random_delta_rot, construct_cam_K, rejection_sample, RejectionSampleError, not_none
+from datagen_utils import (
+    kelvin_to_rgb,
+    MeshLibrary,
+    look_at_rot,
+    random_delta_rot,
+    construct_cam_K,
+    rejection_sample,
+    RejectionSampleError,
+    not_none,
+    set_exit_event
+)
 from annotation import Annotation
 from utils import list_s3_files
 
@@ -470,7 +480,7 @@ def main():
         annot_files = [annot_file for annot_file in annot_files if annot_file not in existing_annots]
     else:
         os.makedirs(ANNOTATIONS_DIR, exist_ok=True)
-    for annot_file in tqdm(annot_files, desc="Downloading annotations"):
+    for annot_file in tqdm(annot_files, desc="Downloading annotations", disable=len(annot_files) == 0):
         s3.download_file("prior-datasets", annot_file, f"{ANNOTATIONS_DIR}/{os.path.basename(annot_file)}")
 
 
@@ -479,24 +489,37 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    n_existing_samples = sum(1 for fn in os.listdir(args.out_dir) if fn.endswith(".pkl"))
+    n_samples = args.n_samples - n_existing_samples
+    if n_samples <= 0:
+        print(f"Already have {n_existing_samples} samples, skipping")
+        return
+    print(f"{n_existing_samples} existing samples, generating {n_samples} more")
     nproc = args.n_proc or os.cpu_count()
     with ProcessPoolExecutor(max_workers=nproc, initializer=procgen_init) as executor:
-        with tqdm(total=args.n_samples, desc="Generating scenes", dynamic_ncols=True) as pbar:
+        with tqdm(total=args.n_samples, desc="Generating scenes", dynamic_ncols=True, initial=n_existing_samples) as pbar:
             futures: list[Future] = []
-            for _ in range(args.n_samples):
-                n_running = sum(f.running() for f in futures)
-                if n_running < 4 * nproc:
-                    futures.append(executor.submit(procgen_worker, datagen_cfg, args.out_dir))
-                else:
-                    time.sleep(0.5)
+            try:
+                for _ in range(n_samples):
+                    n_not_done = sum(not f.done() for f in futures)
+                    if n_not_done < 4 * nproc:
+                        futures.append(executor.submit(procgen_worker, datagen_cfg, args.out_dir))
+                    else:
+                        time.sleep(0.5)
 
-                new_futures = [f for f in futures if not f.done()]
-                if len(new_futures) < len(futures):
-                    pbar.update(len(futures) - len(new_futures))
-                    futures = new_futures
-            if len(futures) > 0:
-                for _ in as_completed(futures):
-                    pbar.update(1)
+                    new_futures = [f for f in futures if not f.done()]
+                    if len(new_futures) < len(futures):
+                        pbar.update(len(futures) - len(new_futures))
+                        futures = new_futures
+                print("Waiting for remaining subprocesses to finish")
+                if len(futures) > 0:
+                    for _ in as_completed(futures):
+                        pbar.update(1)
+            except KeyboardInterrupt:
+                print("Keyboard interrupt, shutting down subprocesses and exiting")
+                set_exit_event()
+                executor.shutdown(wait=False)
+                raise
 
 def main_test():
     annotations: list[Annotation] = []
