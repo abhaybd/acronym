@@ -36,6 +36,7 @@ class DatagenConfig(BaseModel):
     img_size: tuple[int, int] = (480, 640)  # (height, width)
     cam_elevation_range: tuple[float, float] = (np.pi/8, np.pi/3)  # radians
     n_views: int = 10
+    min_annots_per_view: int = 1
     n_objects_range: tuple[int, int] = (4, 6)
     n_background_range: tuple[int, int] = (4, 6)
     color_temp_range: tuple[float, float] = (2000, 10000)  # K
@@ -181,14 +182,14 @@ def visible_annotations(scene: ss.Scene, cam_pose: np.ndarray, grasps: np.ndarra
     visible = np.sum(ray_hit_grasp.reshape(len(grasps), len(GRASP_LOCAL_POINTS)), axis=1) >= 3
     return visible
 
-def noncolliding_annotations(scene: ss.Scene, annots: list[Annotation], grasps: np.ndarray, collision_cache: dict[tuple[str, str], bool]):
+def noncolliding_annotations(scene: ss.Scene, annots: list[Annotation], grasps: np.ndarray, collision_cache: dict[tuple[str, str, int], bool]):
     # grasps is (N, 4, 4) poses in scene frame
     gripper_manager = trimesh.collision.CollisionManager()
     noncolliding = np.ones(len(grasps), dtype=bool)
     cache_miss_idxs = []
     for i, (annot, grasp) in enumerate(zip(annots, grasps)):
-        if (annot.obj.object_category, annot.obj.object_id) in collision_cache:
-            noncolliding[i] = collision_cache[(annot.obj.object_category, annot.obj.object_id)]
+        if (annot.obj.object_category, annot.obj.object_id, annot.grasp_id) in collision_cache:
+            noncolliding[i] = collision_cache[(annot.obj.object_category, annot.obj.object_id, annot.grasp_id)]
             continue
         gripper_manager.add_object(f"gripper_{i}", create_gripper_marker(), transform=grasp)
         cache_miss_idxs.append(i)
@@ -201,7 +202,7 @@ def noncolliding_annotations(scene: ss.Scene, annots: list[Annotation], grasps: 
                 noncolliding[idx] = False
 
         for i in cache_miss_idxs:
-            collision_cache[(annots[i].obj.object_category, annots[i].obj.object_id)] = noncolliding[i]
+            collision_cache[(annots[i].obj.object_category, annots[i].obj.object_id, annots[i].grasp_id)] = noncolliding[i]
     return noncolliding
 
 def point_on_support(scene: ss.Scene):
@@ -216,14 +217,19 @@ def point_on_support(scene: ss.Scene):
     obj_pose = scene.get_transform(surface.node_name)
     return obj_pose[:-1] @ surface.transform @ np.array([x, y, 0, 1])
 
-def sample_camera_pose(scene: ss.Scene, cam_dfov: float):
+def sample_camera_pose(
+    scene: ss.Scene,
+    cam_dfov: float,
+    in_scene_annotations: list[Annotation],
+    annotation_grasps: np.ndarray,
+    collision_cache: dict[tuple[str, str, int], bool]
+):
     img_h, img_w = datagen_cfg.img_size
-    cam_params = construct_cam_K(img_w, img_h, cam_dfov)
-    cam_xfov = 2 * np.arctan(img_w / (2 * cam_params[0, 0]))
-    cam_yfov = 2 * np.arctan(img_h / (2 * cam_params[1, 1]))
+    cam_K = construct_cam_K(img_w, img_h, cam_dfov)
+    cam_xfov = 2 * np.arctan(img_w / (2 * cam_K[0, 0]))
+    cam_yfov = 2 * np.arctan(img_h / (2 * cam_K[1, 1]))
 
     lookat_pos = point_on_support(scene)
-    # scene.add_object(ss.SphereAsset(0.02), translation=lookat_pos)
 
     cam_dist = np.random.uniform(*datagen_cfg.cam_dist_range)
     inclination = np.pi/2 - np.random.uniform(*datagen_cfg.cam_elevation_range)
@@ -241,20 +247,29 @@ def sample_camera_pose(scene: ss.Scene, cam_dfov: float):
             datagen_cfg.cam_pitch_perturb * np.radians(cam_yfov),
             datagen_cfg.cam_yaw_perturb * np.radians(cam_xfov)
         )
-    return cam_params, cam_pose
+
+    in_view_annots, in_view_grasps = get_annotations_in_view(scene, cam_K, cam_pose, in_scene_annotations, annotation_grasps, collision_cache)
+    if len(in_view_annots) < datagen_cfg.min_annots_per_view:
+        return None
+
+    return cam_K, cam_pose, in_view_annots, in_view_grasps
 
 
 def sample_arrangement(
     object_keys: list[tuple[str, str]],
     object_meshes: list[trimesh.Trimesh],
     background_meshes: list[trimesh.Trimesh],
-    support_mesh: trimesh.Trimesh
+    support_mesh: trimesh.Trimesh,
+    object_library: MeshLibrary,
+    annotations: list[Annotation]
 ):
     scene = ss.Scene()
     scene.add_object(ss.TrimeshAsset(support_mesh, origin=("centroid", "centroid", "bottom")), "support")
     support_surfaces = scene.label_support("support", min_area=0.05)
     if len(support_surfaces) == 0:
         return None
+
+    generate_floor_and_walls(scene)
 
     objs_placed = 0
     for (category, obj_id), obj in zip(object_keys, object_meshes):
@@ -266,41 +281,7 @@ def sample_arrangement(
         asset = ss.TrimeshAsset(obj, origin=("centroid", "centroid", "bottom"))
         scene.place_object(f"background_{i}", asset, "support")
 
-    cam_params: list[tuple[np.ndarray, np.ndarray]] = []
-    try:
-        for i in range(datagen_cfg.n_views):
-            cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
-            params = rejection_sample(lambda: sample_camera_pose(scene, cam_dfov), not_none, 100)
-            cam_params.append(params)
-    except RejectionSampleError:
-        return None
-
-    return scene, cam_params
-
-def sample_scene(object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
-    n_objects = min(np.random.randint(*datagen_cfg.n_objects_range), len(object_library.categories()))
-    n_background = min(np.random.randint(*datagen_cfg.n_background_range), len(background_library.categories()))
-
-    object_keys, object_meshes = object_library.sample(n_objects)
-    background_keys, background_meshes = background_library.sample(n_background, replace=True)
-    support_key, support_mesh = support_library.sample()
-
-    try:
-        return rejection_sample(
-            lambda: sample_arrangement(object_keys, object_meshes, background_meshes, support_mesh),
-            not_none,
-            10
-        )
-    except RejectionSampleError:
-        return None
-
-def generate_obs(scene: ss.Scene, views: list[tuple[np.ndarray, np.ndarray]], object_library: MeshLibrary, annotations: list[Annotation]):
-    """
-    Returns:
-        all_annotations: dict[str, tuple[Annotation, np.ndarray]]  # annotation_id -> (annotation, grasp)
-        annots_per_view: list[list[str]]  # annotation_id list for each view
-    """
-    grasps_dict: dict[tuple[str, str], np.ndarray] = {}  # maps object in scene to its grasps
+    grasps_dict: dict[tuple[str, str], np.ndarray] = {}  # maps object in scene to its grasps in centroid frame
     for name in scene.get_object_names():
         assert isinstance(name, str)
         if not name.startswith("object_"):
@@ -317,57 +298,100 @@ def generate_obs(scene: ss.Scene, views: list[tuple[np.ndarray, np.ndarray]], ob
             grasp_local = grasps_dict[(annot.obj.object_category, annot.obj.object_id)][annot.grasp_id].copy()
             geom_names = scene.get_geometry_names(obj_name)
             assert len(geom_names) == 1
+            # the grasp is in the centroid frame of the object, so offset by centroid in local frame
             grasp_local[:3, 3] += scene.get_centroid(geom_names[0], obj_name)
             obj_trf = scene.get_transform(obj_name)
-            grasp = obj_trf @ grasp_local
+            grasp = obj_trf @ grasp_local  # transform to scene frame
             annotation_grasps.append(grasp)
 
     annotation_grasps = np.array(annotation_grasps)
-    collision_cache: dict[tuple[str, str], bool] = {}  # (category, id) -> is colliding
-    # print(f"Before filtering: {len(annotation_grasps)}")
+    collision_cache: dict[tuple[str, str, int], bool] = {}  # (category, obj_id, grasp_id) -> is colliding
 
-    all_annotations: dict[str, tuple[Annotation, np.ndarray]] = {}  # annotation_id -> (annotation, grasp)
+    views: list[tuple[np.ndarray, np.ndarray]] = []
+    annots_in_scene: dict[str, tuple[Annotation, np.ndarray]] = {}  # annotation_id -> (annotation, grasp)
     annots_per_view: list[list[str]] = []
-    for cam_K, cam_pose in views:
-        in_view_annots = in_scene_annotations
-        in_view_grasps = annotation_grasps
-        for mask_fn in [
-            lambda grasps: on_screen_annotations(cam_K, cam_pose, grasps),
-            lambda grasps: noncolliding_annotations(scene, in_scene_annotations, grasps, collision_cache),
-            lambda grasps: visible_annotations(scene, cam_pose, grasps)
-        ]:
-            # TODO: also filter out grasps that are too far from the camera
-            mask = mask_fn(in_view_grasps)
-            in_view_annots = list(compress(in_view_annots, mask))
-            in_view_grasps = in_view_grasps[mask]
-            if not np.any(mask):
-                break
-        annots_in_view = []
-        for annot, grasp in zip(in_view_annots, in_view_grasps):
-            annot_id = f"{annot.obj.object_category}_{annot.obj.object_id}_{annot.grasp_id}"
-            all_annotations[annot_id] = (annot, grasp)
-            annots_in_view.append(annot_id)
-        # print(f"Number of annotations in view: {len(annots_in_view)}")
-        annots_per_view.append(annots_in_view)
+    try:
+        for i in range(datagen_cfg.n_views):
+            cam_dfov = np.random.uniform(*datagen_cfg.cam_dfov_range)
+            cam_K, cam_pose, in_view_annots, in_view_grasps = rejection_sample(
+                lambda: sample_camera_pose(scene, cam_dfov, in_scene_annotations, annotation_grasps, collision_cache),
+                not_none,
+                100
+            )
+            views.append([cam_K, cam_pose])
+            annots_per_view.append([])
+            for annot, grasp in zip(in_view_annots, in_view_grasps):
+                annot_id = f"{annot.obj.object_category}_{annot.obj.object_id}_{annot.grasp_id}"
+                annots_in_scene[annot_id] = (annot, grasp)
+                annots_per_view[-1].append(annot_id)
+    except RejectionSampleError:
+        return None
 
-    return all_annotations, annots_per_view
+    return scene, views, annots_in_scene, annots_per_view
+
+def sample_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
+    n_objects = min(np.random.randint(*datagen_cfg.n_objects_range), len(object_library.categories()))
+    n_background = min(np.random.randint(*datagen_cfg.n_background_range), len(background_library.categories()))
+
+    object_keys, object_meshes = object_library.sample(n_objects)
+    background_keys, background_meshes = background_library.sample(n_background, replace=True)
+    support_key, support_mesh = support_library.sample()
+
+    try:
+        return rejection_sample(
+            lambda: sample_arrangement(object_keys, object_meshes, background_meshes, support_mesh, object_library, annotations),
+            not_none,
+            10
+        )
+    except RejectionSampleError:
+        return None
+
+def get_annotations_in_view(
+    scene: ss.Scene,
+    cam_K: np.ndarray,
+    cam_pose: np.ndarray,
+    in_scene_annotations: list[Annotation],
+    annotation_grasps: np.ndarray,
+    collision_cache: dict[tuple[str, str, int], bool]
+):
+    """
+    Returns:
+        in_view_annots: list[Annotation] - annotations in view
+        in_view_grasps: np.ndarray - grasps in scene frame
+    """
+    in_view_annots = in_scene_annotations
+    in_view_grasps = annotation_grasps
+    for mask_fn in [
+        lambda grasps: on_screen_annotations(cam_K, cam_pose, grasps),
+        lambda grasps: noncolliding_annotations(scene, in_scene_annotations, grasps, collision_cache),
+        lambda grasps: visible_annotations(scene, cam_pose, grasps)
+    ]:
+        # TODO: also filter out grasps that are too far from the camera
+        mask = mask_fn(in_view_grasps)
+        in_view_annots = list(compress(in_view_annots, mask))
+        in_view_grasps = in_view_grasps[mask]
+        if not np.any(mask):
+            break
+    
+    return in_view_annots, in_view_grasps
 
 def generate_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
-    scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
-    generate_floor_and_walls(scene)
+    scene, views, annots_in_scene, annots_per_view = rejection_sample(
+        lambda: sample_scene(annotations, object_library, background_library, support_library),
+        not_none,
+        100
+    )
     lighting = generate_lighting(scene)
 
-    all_annotations, annots_per_view = generate_obs(scene, cam_params, object_library, annotations)
-    # TODO: don't save views that don't have any annotations
     glb_bytes: bytes = scene.export(file_type="glb")
 
     data = {
-        "annotations": all_annotations,
+        "annotations": annots_in_scene,
         "views": [],
         "lighting": lighting,
         "glb": base64.b64encode(glb_bytes).decode("utf-8")
     }
-    for (cam_K, cam_pose), annots in zip(cam_params, annots_per_view):
+    for (cam_K, cam_pose), annots in zip(views, annots_per_view):
         data["views"].append({
             "cam_K": cam_K,
             "cam_pose": cam_pose,
@@ -388,8 +412,9 @@ def procgen_init():
 
     globals()["annotations"] = annotations
     globals()["object_library"] = MeshLibrary(annotated_instances)
+    background_categories = [cat for cat in ALL_OBJECT_CATEGORIES if cat not in annotated_instances]
+    globals()["background_library"] = MeshLibrary.from_categories(background_categories)
     globals()["support_library"] = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
-    globals()["background_library"] = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
 
     import threading
     def exit_if_orphaned():
@@ -407,7 +432,6 @@ def procgen_worker(out_dir: str):
         globals()["support_library"]
     )
     scene_id = uuid.uuid4().hex
-    # TODO: don't save scenes without any views with annotations (and don't mark as completed)
     with open(f"{out_dir}/{scene_id}.pkl", "wb") as f:
         pickle.dump(data, f)
 
@@ -450,12 +474,13 @@ def main_test():
 
     object_library = MeshLibrary(annotated_instances)
     support_library = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
-    background_library = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
+    background_categories = [cat for cat in ALL_OBJECT_CATEGORIES if cat not in annotated_instances]
+    background_library = MeshLibrary.from_categories(background_categories)
 
     data = generate_scene(annotations, object_library, background_library, support_library)
     with open("tmp/scene.pkl", "wb") as f:
         pickle.dump(data, f)
 
 if __name__ == "__main__":
-    main()
-    # main_test()
+    # main()
+    main_test()

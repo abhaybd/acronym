@@ -1,7 +1,7 @@
 import os
 import json
-from typing import Any, Callable
-
+from typing import Any, Callable, TypeVar
+from functools import lru_cache
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import trimesh
@@ -18,7 +18,9 @@ class RejectionSampleError(Exception):
 def not_none(x: Any):
     return x is not None
 
-def rejection_sample(sampler_fn: Callable[[], Any], condition_fn: Callable[[Any], bool], max_iters: int = 1000):
+U = TypeVar("U")
+
+def rejection_sample(sampler_fn: Callable[[], U], condition_fn: Callable[[U], bool], max_iters: int = 1000) -> U:
     for _ in range(max_iters):
         sample = sampler_fn()
         if condition_fn(sample):
@@ -74,7 +76,6 @@ def random_delta_rot(roll_range: float, pitch_range: float, yaw_range: float):
 class MeshLibrary(object):
     def __init__(self, library: dict[str, set[str]], load_kwargs: dict | None = None):
         self.library = library
-        self.meshes: dict[tuple[str, str], dict[str, trimesh.Trimesh]] = {}
         self.load_kwargs = load_kwargs or {}
 
     @classmethod
@@ -90,15 +91,12 @@ class MeshLibrary(object):
         return cls(library, load_kwargs)
 
     def __getitem__(self, key: tuple[str, str]) -> trimesh.Trimesh:
-        if key in self.meshes:
-            return self.meshes[key]
         category, obj_id = key
         if category not in self.library:
             raise KeyError(f"Category {category} not found")
         if obj_id not in self.library[category]:
             raise KeyError(f"Object {obj_id} not found in category {category}")
-        self.meshes[key] = self._load_mesh(category, obj_id, center=True)
-        return self.meshes[key]
+        return self._load_mesh(category, obj_id, center=True)
 
     def __len__(self):
         return sum(map(len, self.library.values()))
@@ -127,6 +125,7 @@ class MeshLibrary(object):
             ret_meshes.append(self[category, obj_id])
         return (ret_keys, ret_meshes) if n_categories else (ret_keys[0], ret_meshes[0])
 
+    @lru_cache(maxsize=2048)
     def _load_mesh(self, category: str, obj_id: str, center: bool = True):
         fn = f"data/grasps/{category}_{obj_id}.h5"
         mesh = load_mesh(fn, mesh_root_dir="data", **self.load_kwargs)
