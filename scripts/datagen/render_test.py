@@ -7,7 +7,6 @@ if os.environ.get("PYOPENGL_PLATFORM") is None:
 import pyrender
 import numpy as np
 import trimesh
-import json
 import base64
 import io
 from PIL import Image
@@ -26,7 +25,7 @@ glb_bytes = base64.b64decode(data["glb"].encode("utf-8"))
 glb_bytes_io = io.BytesIO(glb_bytes)
 tr_scene: trimesh.Scene = trimesh.load(glb_bytes_io, file_type="glb")
 scene = pyrender.Scene.from_trimesh_scene(tr_scene)
-r = pyrender.OffscreenRenderer(640, 480)
+renderer = pyrender.OffscreenRenderer(640, 480)
 
 annot_dict: dict[str, tuple[Annotation, np.ndarray]] = data["annotations"]
 
@@ -50,13 +49,18 @@ for i, view in enumerate(data["views"]):
         name="camera",
     )
     cam_node = pyrender.Node(name="camera", camera=cam, matrix=cam_pose)
-    if (ns := scene.get_nodes(name="camera")) is not None:
-        for n in ns:
-            scene.remove_node(n)
+    for n in (scene.get_nodes(name=cam_node.name) or []):
+        scene.remove_node(n)
     scene.add_node(cam_node)
 
+    cam_light = pyrender.light.PointLight(intensity=2.0, name="camera_light")
+    camera_light_node = pyrender.Node(name="camera_light", matrix=cam_pose, light=cam_light)
+    for n in (scene.get_nodes(name=camera_light_node.name) or []):
+        scene.remove_node(n)
+    scene.add_node(camera_light_node)
+
     start = time.perf_counter()
-    color, depth = r.render(scene, flags=pyrender.RenderFlags.SHADOWS_ALL)
+    color, depth = renderer.render(scene, flags=pyrender.RenderFlags.SHADOWS_DIRECTIONAL)
     end = time.perf_counter()
     print(f"Render time: {1000 * (end - start):.2f} ms")
     r, c = i // 3, i % 3

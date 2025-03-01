@@ -118,9 +118,9 @@ def generate_lighting(scene: ss.Scene) -> list[dict]:
     light_inclination = np.random.uniform(*datagen_cfg.light_inclination_range)
     light_trf = np.eye(4)
     light_direction = np.array([
-        np.cos(light_azimuth) * np.cos(light_inclination),
-        np.sin(light_azimuth) * np.cos(light_inclination),
-        np.sin(light_inclination)
+        np.sin(light_inclination) * np.cos(light_azimuth),
+        np.sin(light_inclination) * np.sin(light_azimuth),
+        np.cos(light_inclination)
     ])  # opposite of direction light is pointing
     light_trf[:3, :3] = look_at_rot(light_direction, np.zeros(3))
     lights = [
