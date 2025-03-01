@@ -74,7 +74,7 @@ def random_delta_rot(roll_range: float, pitch_range: float, yaw_range: float):
 class MeshLibrary(object):
     def __init__(self, library: dict[str, set[str]], load_kwargs: dict | None = None):
         self.library = library
-        self.meshes: dict[str, dict[str, trimesh.Trimesh]] = {}
+        self.meshes: dict[tuple[str, str], dict[str, trimesh.Trimesh]] = {}
         self.load_kwargs = load_kwargs or {}
 
     @classmethod

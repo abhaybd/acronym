@@ -1,6 +1,10 @@
+import argparse
+from concurrent.futures import ProcessPoolExecutor, Future
 import json
 import os
 import pickle
+import time
+import uuid
 from tqdm import tqdm
 import numpy as np
 import trimesh
@@ -85,7 +89,6 @@ def generate_floor_and_walls(scene: ss.Scene):
     center_lo = scene_bounds[1,:2] - np.array([width, depth])/2
     center_hi = scene_bounds[0,:2] + np.array([width, depth])/2
     center = np.append(np.random.uniform(center_lo, center_hi), 0)
-    print(center)
 
     floor_plane = create_plane(width+0.2, depth+0.2, center, (0, 0, 1))
     uv = np.array([[0,0], [1,0], [0,1], [1,1]]) * np.array([width, depth])
@@ -321,7 +324,7 @@ def generate_obs(scene: ss.Scene, views: list[tuple[np.ndarray, np.ndarray]], ob
 
     annotation_grasps = np.array(annotation_grasps)
     collision_cache: dict[tuple[str, str], bool] = {}  # (category, id) -> is colliding
-    print(f"Before filtering: {len(annotation_grasps)}")
+    # print(f"Before filtering: {len(annotation_grasps)}")
 
     all_annotations: dict[str, tuple[Annotation, np.ndarray]] = {}  # annotation_id -> (annotation, grasp)
     annots_per_view: list[list[str]] = []
@@ -344,12 +347,97 @@ def generate_obs(scene: ss.Scene, views: list[tuple[np.ndarray, np.ndarray]], ob
             annot_id = f"{annot.obj.object_category}_{annot.obj.object_id}_{annot.grasp_id}"
             all_annotations[annot_id] = (annot, grasp)
             annots_in_view.append(annot_id)
-        print(f"Number of annotations in view: {len(annots_in_view)}")
+        # print(f"Number of annotations in view: {len(annots_in_view)}")
         annots_per_view.append(annots_in_view)
 
     return all_annotations, annots_per_view
 
+def generate_scene(annotations: list[Annotation], object_library: MeshLibrary, background_library: MeshLibrary, support_library: MeshLibrary):
+    scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
+    generate_floor_and_walls(scene)
+    lighting = generate_lighting(scene)
+
+    all_annotations, annots_per_view = generate_obs(scene, cam_params, object_library, annotations)
+    # TODO: don't save views that don't have any annotations
+    glb_bytes: bytes = scene.export(file_type="glb")
+
+    data = {
+        "annotations": all_annotations,
+        "views": [],
+        "lighting": lighting,
+        "glb": base64.b64encode(glb_bytes).decode("utf-8")
+    }
+    for (cam_K, cam_pose), annots in zip(cam_params, annots_per_view):
+        data["views"].append({
+            "cam_K": cam_K,
+            "cam_pose": cam_pose,
+            "annotations_in_view": annots
+        })
+    return data
+
+def procgen_init():
+    annotations: list[Annotation] = []
+    for annot_fn in os.listdir("annotations"):  # TODO: load from s3
+        annotations.append(load_annotation(f"annotations/{annot_fn}"))
+
+    annotated_instances: dict[str, set[str]] = {}
+    for annot in annotations:
+        if annot.obj.object_category not in annotated_instances:
+            annotated_instances[annot.obj.object_category] = set()
+        annotated_instances[annot.obj.object_category].add(annot.obj.object_id)
+
+    globals()["annotations"] = annotations
+    globals()["object_library"] = MeshLibrary(annotated_instances)
+    globals()["support_library"] = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
+    globals()["background_library"] = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
+
+    import threading
+    def exit_if_orphaned():
+        import multiprocessing
+        multiprocessing.parent_process().join()  # wait for parent process to die first; may never happen
+        print("Orphaned process detected, exiting")
+        os._exit(-1)
+    threading.Thread(target=exit_if_orphaned, daemon=True).start()
+
+def procgen_worker(out_dir: str):
+    data = generate_scene(
+        globals()["annotations"],
+        globals()["object_library"],
+        globals()["background_library"],
+        globals()["support_library"]
+    )
+    scene_id = uuid.uuid4().hex
+    # TODO: don't save scenes without any views with annotations (and don't mark as completed)
+    with open(f"{out_dir}/{scene_id}.pkl", "wb") as f:
+        pickle.dump(data, f)
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n-proc", type=int, help="Number of processes, if unspecified uses all available cores")
+    parser.add_argument("n_samples", type=int, help="Number of samples to generate")
+    parser.add_argument("out_dir", type=str, help="Output directory")
+    return parser.parse_args()
+
 def main():
+    args = get_args()
+
+    nproc = args.n_proc or os.cpu_count()
+    with ProcessPoolExecutor(max_workers=nproc, initializer=procgen_init) as executor:
+        with tqdm(total=args.n_samples, desc="Generating scenes", dynamic_ncols=True) as pbar:
+            futures: list[Future] = []
+            for _ in range(args.n_samples):
+                n_running = sum(f.running() for f in futures)
+                if n_running < 4 * nproc:
+                    futures.append(executor.submit(procgen_worker, args.out_dir))
+
+                new_futures = [f for f in futures if not f.done()]
+                if len(new_futures) < len(futures):
+                    pbar.update(len(futures) - len(new_futures))
+                    futures = new_futures
+                time.sleep(0.5)
+
+
+def main_test():
     annotations: list[Annotation] = []
     for annot_fn in tqdm(os.listdir("annotations"), desc="Loading annotations"):
         annotations.append(load_annotation(f"annotations/{annot_fn}"))
@@ -364,46 +452,10 @@ def main():
     support_library = MeshLibrary.from_categories(SUPPORT_CATEGORIES, load_kwargs={"scale": 0.025})
     background_library = MeshLibrary.from_categories(ALL_OBJECT_CATEGORIES)
 
-    scene, cam_params = rejection_sample(lambda: sample_scene(object_library, background_library, support_library), not_none, 100)
-    scene: ss.Scene
-    generate_floor_and_walls(scene)
-    lighting = generate_lighting(scene)
-
-    all_annotations, annots_per_view = generate_obs(scene, cam_params, object_library, annotations)
-
-
-    glb_bytes: bytes = scene.export(file_type="glb")
-
-    try:
-        scene.show()
-    except:
-        pass
-
-    data = {
-        "annotations": all_annotations,
-        "views": [],
-        "lighting": lighting,
-        "glb": base64.b64encode(glb_bytes).decode("utf-8")
-    }
-    for (cam_K, cam_pose), annots in zip(cam_params, annots_per_view):
-        data["views"].append({
-            "cam_K": cam_K,
-            "cam_pose": cam_pose,
-            "annotations_in_view": annots
-        })
-
+    data = generate_scene(annotations, object_library, background_library, support_library)
     with open("tmp/scene.pkl", "wb") as f:
         pickle.dump(data, f)
 
-    # for i, (cam_K, cam_pose) in enumerate(cam_params):
-    #     data = {
-    #         "cam_K": cam_K.tolist(),
-    #         "cam_pose": cam_pose.tolist(),
-    #         "lighting": lighting,
-    #         "glb": base64.b64encode(glb_bytes).decode("utf-8")
-    #     }
-    #     with open(f"tmp/scene_{i}.json", "w") as f:
-    #         json.dump(data, f)
-
 if __name__ == "__main__":
     main()
+    # main_test()
