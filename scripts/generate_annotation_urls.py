@@ -24,6 +24,7 @@ def get_args():
     args.add_argument("-o", "--output")
     args.add_argument("--schedule-length", type=int, default=5)
     args.add_argument("--limit", type=int)
+    args.add_argument("--blacklist", help="File containing object assets to blacklist")
     args.add_argument("categories", nargs="+")
     return args.parse_args()
 
@@ -47,11 +48,17 @@ def main():
 
     completed = completed_annotations(s3)
 
+    if args.blacklist:
+        with open(args.blacklist, "r") as f:
+            blacklist = set(f.read().strip().splitlines())
+    else:
+        blacklist = set()
+
     params = []
     for category in args.categories:
         for obj_id, grasps in skeleton[category].items():
             for grasp_id in grasps:
-                if (category, obj_id, grasp_id) in completed:
+                if (category, obj_id, grasp_id) in completed or f"{category}_{obj_id}_{grasp_id}" in blacklist:
                     continue
                 p = {
                     "object_category": category,
