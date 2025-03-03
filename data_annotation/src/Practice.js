@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import ObjectViewer from './ObjectViewer';
 import Tutorial from './Tutorial';
-import './Quiz.css';
+import './Practice.css';
 
 const QUESTIONS = [
   {
@@ -67,7 +67,7 @@ const QUESTIONS = [
   }
 ];
 
-const Quiz = () => {
+const Practice = () => {
   const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -203,4 +203,4 @@ const Quiz = () => {
   );
 };
 
-export default Quiz;
+export default Practice;

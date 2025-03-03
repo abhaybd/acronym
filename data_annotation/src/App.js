@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import DataAnnotation from './DataAnnotation';
-import Quiz from './Quiz';
-import { Routes, Route } from 'react-router';
+import Practice from './Practice';
+import { Routes, Route, Navigate } from 'react-router';
 import './App.css';
 import * as THREE from 'three';
 
@@ -10,6 +10,14 @@ function Done() {
     <div className="done-body">
       <h2>Thank you for your submission!</h2>
       <p>You can close this tab now.</p>
+    </div>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="not-found-body">
+      <h2>404 Not Found</h2>
     </div>
   );
 }
@@ -28,8 +36,10 @@ function App() {
       <main className="App-main">
         <Routes>
           <Route path="/" element={<DataAnnotation />} />
-          <Route path="/quiz" element={<Quiz />} />
+          <Route path="/practice" element={<Practice />} />
           <Route path="/done" element={<Done />} />
+          <Route path="/404" element={<NotFound />} />
+          <Route path="*" element={<Navigate to="/404" />} />
         </Routes>
       </main>
     </div>
