@@ -1,0 +1,40 @@
+.references-container {
+  background: #fdf5e6;
+  padding: 20px;
+  border-radius: 8px;
+  margin: 0 auto;
+}
+
+.reference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  margin-top: 20px;
+}
+
+.reference-item {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.reference-viewer {
+  flex: 0 0 40%;
+  width: 40%;
+}
+
+.reference-text {
+  flex: 1;
+}
+
+.reference-text h3 {
+  color: #ff69b4;
+  margin-bottom: 10px;
+}
+
+.reference-text p {
+  line-height: 1.5;
+} 

@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import DataAnnotation from './DataAnnotation';
 import Practice from './Practice';
+import Reference from './Reference';
 import { Routes, Route, Navigate } from 'react-router';
 import './App.css';
 import * as THREE from 'three';
@@ -38,6 +39,7 @@ function App() {
           <Route path="/" element={<DataAnnotation />} />
           <Route path="/practice" element={<Practice />} />
           <Route path="/done" element={<Done />} />
+          <Route path="/reference" element={<Reference />} />
           <Route path="/404" element={<NotFound />} />
           <Route path="*" element={<Navigate to="/404" />} />
         </Routes>

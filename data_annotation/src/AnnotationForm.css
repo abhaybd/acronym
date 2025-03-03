@@ -49,3 +49,8 @@ select {
     border: 1px solid #ccc;
     border-radius: 5px;
 }
+
+.form-label {
+    white-space: nowrap;
+    margin-right: 8px;  /* Add some spacing between label and input */
+}

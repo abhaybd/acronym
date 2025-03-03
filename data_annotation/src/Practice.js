@@ -4,7 +4,7 @@ import ObjectViewer from './ObjectViewer';
 import Tutorial from './Tutorial';
 import './Practice.css';
 
-const QUESTIONS = [
+export const QUESTIONS = [
   {
     object: {
       object_category: "Mug",
@@ -64,6 +64,36 @@ const QUESTIONS = [
         feedback: "Incorrect. While factual, the description should also include information about the orientation of the grasp.",
       }
     ]
+  },
+  {
+    object: {
+      object_category: "WineGlass",
+      object_id: "2d89d2b3b6749a9d99fbba385cc0d41d_0.0024652679182251653",
+      grasp_id: 1298
+    },
+    answers: [
+      {
+        id: 'a',
+        text: "The grasp is on the base of the wine glass, oriented at an angle. The fingers are grasping the top and bottom of the base.",
+        feedback: "Correct! This description focuses on the position and orientation of the grasp without judging its quality.",
+        correct: true,
+      },
+      {
+        id: 'b',
+        text: "The grasp is on the bottom of the wine glass, The fingers will collide with the table, since they are holding the top and bottom.",
+        feedback: "Incorrect. The description should not extend beyond the grasp to describe interactions with the environment.",
+      },
+      {
+        id: 'c',
+        text: "The robot is grasping the flat part on the bottom of the wine glass.",
+        feedback: "Incorrect. The description should only be a factual description of the grasp, not a comment on what is doing the grasping, which may or may not be a robot.",
+      },
+      {
+        id: 'd',
+        text: "The grasp is infeasible, since the fingers are not aligned with the base of the wine glass.",
+        feedback: "Incorrect. The description should not include judgments about the feasibility of the grasp.",
+      }
+    ]
   }
 ];
 
@@ -89,14 +119,14 @@ const Practice = () => {
 
   const handleSubmit = () => {
     if (selectedAnswer === null) return;
-    setShowFeedback(true);
-    setSubmittedAnswers(prev => new Set([...prev, selectedAnswer]));
     
-    // Check if answer is correct and update score
     const isCorrect = currentQuestion.answers.find(a => a.id === selectedAnswer)?.correct ?? false;
-    if (isCorrect) {
+    if (isCorrect && submittedAnswers.size === 0) {  // Only count if first attempt
       setCorrectAnswers(prev => prev + 1);
     }
+
+    setShowFeedback(true);
+    setSubmittedAnswers(prev => new Set([...prev, selectedAnswer]));
   };
 
   const handleContinue = () => {
@@ -117,7 +147,6 @@ const Practice = () => {
         }
       }
     } else {
-      // Move to next question
       setCurrentQuestionIdx(prev => prev + 1);
       setSelectedAnswer(null);
       setShowFeedback(false);
@@ -131,13 +160,13 @@ const Practice = () => {
         <button className="ai2-button" onClick={() => setShowTutorial(true)}>Show Tutorial</button>
       </div>
 
-      <h2>Practice Question</h2>
+      <h2>Practice Question {currentQuestionIdx + 1} of {QUESTIONS.length}</h2>
       <p>
         Please read the tutorial closely before answering the following practice questions.
+        Getting too many questions wrong will result in a request for your submission to be returned.
       </p>
       <p>
         Which of the following would be the most appropriate grasp description for this image?
-        Please see the tutorial for more information.
       </p>
       
       <div className={`quiz-content ${showTutorial ? 'dimmed' : ''}`}>

@@ -5,6 +5,7 @@ import AnnotationForm from './AnnotationForm';
 import Tutorial from './Tutorial';
 import ProgressBar from './ProgressBar';
 import './DataAnnotation.css';
+import { BsBoxArrowUpRight } from 'react-icons/bs';
 
 const DataAnnotation = () => {
   const navigate = useNavigate();
@@ -106,6 +107,10 @@ const DataAnnotation = () => {
           {loading ? 'Loading...' : 'Fetch Mesh'}
         </button>
         <button className="ai2-button" onClick={() => setShowTutorial(true)}>Show Tutorial</button>
+        <button className="ai2-button" onClick={() => window.open("/reference", '_blank')}>
+          Show Examples
+        <BsBoxArrowUpRight style={{marginLeft: "5px"}} />
+        </button>
       </div>
       {annotSchedule && annotSchedule.annotations.length > 1 && (
         <div className="progress-container">

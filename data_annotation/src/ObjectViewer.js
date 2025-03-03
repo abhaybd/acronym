@@ -19,9 +19,7 @@ const ObjectViewer = ({ object_category, object_id, grasp_id, onFinishedLoading 
     return <primitive object={gltf.scene} />;
   };
 
-  console.log(object_category, object_id, grasp_id);
   const hasData = !!object_category && !!object_id && !!grasp_id;
-  console.log(hasData);
 
   const Spinner = () => <div className="spinner"></div>;
 

@@ -138,7 +138,7 @@ const AnnotationForm = ({ category, object_id, grasp_id, onSubmit, prolific_code
                 </label>
             </div>
             <div className="form-group">
-                <label title="Select the appropriateness of the grasp, see tutorial for details">
+                <label className="form-label" title="Select the appropriateness of the grasp, see tutorial for details">
                     <div style={{ display: "flex", alignItems: "center" }}>
                         <BsFillInfoCircleFill color="gray" className="info-icon" />
                         <span>Grasp Label:</span>
