@@ -110,6 +110,20 @@ const Practice = () => {
   const currentQuestion = QUESTIONS[currentQuestionIdx];
 
   useEffect(() => {
+    const lastPassedTime = localStorage.getItem('practicePassedTime');
+    if (lastPassedTime) {
+      const hoursSincePass = (Date.now() - parseInt(lastPassedTime)) / (1000 * 60 * 60);
+      if (hoursSincePass < 24) {
+        navigate({
+          pathname: '/',
+          search: searchParams.toString()
+        }, {replace: true});
+        return;
+      }
+    }
+  }, [navigate, searchParams]);
+
+  useEffect(() => {
     const hasSeenTutorial = localStorage.getItem('hasSeenTutorial');
     if (!hasSeenTutorial) {
       setShowTutorial(true);
@@ -132,6 +146,7 @@ const Practice = () => {
   const handleContinue = () => {
     if (currentQuestionIdx === QUESTIONS.length - 1) {
       if (correctAnswers / QUESTIONS.length >= 0.5) {
+        localStorage.setItem('practicePassedTime', Date.now().toString());
         navigate({
           pathname: '/',
           search: searchParams.toString()
