@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { BsFillInfoCircleFill } from "react-icons/bs";
-import { useNavigate } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import './AnnotationForm.css';
 
 const AnnotationForm = ({ category, object_id, grasp_id, onSubmit, prolific_code }) => {
-    const navigate = useNavigate();
     const [objDescription, setObjDescription] = useState('');
     const [graspDescription, setGraspDescription] = useState('');
     const [isMalformed, setIsMalformed] = useState('');

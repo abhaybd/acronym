@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { createSearchParams, useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import ObjectViewer from './ObjectViewer';
 import AnnotationForm from './AnnotationForm';
 import Tutorial from './Tutorial';
@@ -83,7 +83,7 @@ const DataAnnotation = () => {
   const oneshot = searchParams.get('oneshot') === 'true' || searchParams.has("prolific_code");
 
   const onFormSubmit = async () => {
-    if (annotSchedule.idx + 1 == annotSchedule.annotations.length) {
+    if (annotSchedule.idx + 1 === annotSchedule.annotations.length) {
       if (!oneshot) {
         await fetchObjectInfo();
       } else if (searchParams.has("prolific_code")) {
