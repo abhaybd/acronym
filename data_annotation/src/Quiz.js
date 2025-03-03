@@ -14,28 +14,57 @@ const QUESTIONS = [
     answers: [
       {
         id: 'a',
-        text: "This is a good grasp on the teapot's spout. It would be stable and secure for pouring.",
+        text: "This is a good grasp since it's on the handle of the mug. It's stable and secure.",
         feedback: "Incorrect. The description should not include judgments about the grasp quality or stability.",
       },
       {
         id: 'b',
-        text: "The grasp is positioned on the spout of the teapot where it meets the body, with fingers closing horizontally on either side.",
+        text: "The grasp is on the middle of the handle of the mug, coming from above and to the side at an angle. The fingers are grasping either side of the handle.",
         feedback: "Correct! This description focuses on the position and orientation of the grasp without judging its quality.",
         correct: true,
       },
       {
         id: 'c',
-        text: "The grasp is poorly placed on the spout. A better position would be on the handle of the teapot.",
+        text: "The grasp is on the handle of the mug, grasping the sides. However, it's coming at an angle, and should be straight on instead.",
         feedback: "Incorrect. The description should not suggest alternative grasp locations or judge the grasp quality.",
       },
       {
         id: 'd',
-        text: "The robot is trying to grasp the teapot's spout which might cause it to spill.",
+        text: "The robot is trying to lift the mug by the handle, which may cause it to spill due to the angle.",
         feedback: "Incorrect. The description should not speculate about outcomes or consequences of the grasp.",
       }
     ]
   },
-  // Add more questions here with similar structure
+  {
+    object: {
+      object_category: "Pan",
+      object_id: "c8b06a6cb1a910c38e43a810a63361f0_3.666323933306171e-05",
+      grasp_id: 529
+    },
+    answers: [
+      {
+        id: 'a',
+        text: "The grasp is on the rim of the pan, which is suboptimal since the pan may be hot.",
+        feedback: "Incorrect. The description should not include judgments about the grasp quality or stability.",
+      },
+      {
+        id: 'b',
+        text: "The grasp is on the wrong side of the pan, coming from above and grasping the inside and outside of the pan's rim.",
+        feedback: "Incorrect. The description should not include judgments about whether the grasp is right or wrong.",
+      },
+      {
+        id: 'c',
+        text: "The grasp is on the rim of the pan, approximately opposite the handle. It is oriented vertically and grasping the inside and outside of the pan's rim.",
+        feedback: "Correct! This description focuses on the position and orientation of the grasp without judging its quality.",
+        correct: true,
+      },
+      {
+        id: 'd',
+        text: "The grasp is on the rim of the pan, opposite the handle.",
+        feedback: "Incorrect. While factual, the description should also include information about the orientation of the grasp.",
+      }
+    ]
+  }
 ];
 
 const Quiz = () => {
@@ -72,16 +101,20 @@ const Quiz = () => {
 
   const handleContinue = () => {
     if (currentQuestionIdx === QUESTIONS.length - 1) {
-      // Calculate score percentage
-      const scorePercentage = (correctAnswers / QUESTIONS.length) * 100;
-      
-      if (scorePercentage >= 70) {
+      if (correctAnswers / QUESTIONS.length >= 0.5) {
         navigate({
           pathname: '/',
           search: searchParams.toString()
         }, {replace: true});
       } else {
-        navigate('/placeholder', {replace: true});
+        if (searchParams.has("prolific_rejection_code")) {
+          window.location.href = `https://app.prolific.com/submissions/complete?cc=${searchParams.get("prolific_rejection_code")}`;
+        } else {
+          alert("Sorry, you did not answer a sufficient number of questions correctly. You will be redirected shortly.");
+          setTimeout(() => {
+            navigate('/done', {replace: true});
+          }, 3000);
+        }
       }
     } else {
       // Move to next question
@@ -100,6 +133,9 @@ const Quiz = () => {
 
       <h2>Practice Question</h2>
       <p>
+        Please read the tutorial closely before answering the following practice questions.
+      </p>
+      <p>
         Which of the following would be the most appropriate grasp description for this image?
         Please see the tutorial for more information.
       </p>
@@ -117,21 +153,23 @@ const Quiz = () => {
           <div className="answer-container">
             {currentQuestion.answers.map((answer) => (
               <div key={answer.id} className="answer-option">
-                <input
-                  type="radio"
-                  id={answer.id}
-                  name="quiz-answer"
-                  value={answer.id}
-                  checked={selectedAnswer === answer.id}
-                  onChange={(e) => setSelectedAnswer(e.target.value)}
-                  disabled={submittedAnswers.has(answer.id)}
-                />
-                <label 
-                  htmlFor={answer.id} 
-                  className={submittedAnswers.has(answer.id) ? 'disabled' : ''}
-                >
-                  {answer.text}
-                </label>
+                <div className="answer-option-content">
+                  <input
+                    type="radio"
+                    id={answer.id}
+                    name="quiz-answer"
+                    value={answer.id}
+                    checked={selectedAnswer === answer.id}
+                    onChange={(e) => setSelectedAnswer(e.target.value)}
+                    disabled={submittedAnswers.has(answer.id)}
+                  />
+                  <label 
+                    htmlFor={answer.id} 
+                    className={submittedAnswers.has(answer.id) ? 'disabled' : ''}
+                  >
+                    {answer.text}
+                  </label>
+                </div>
                 {showFeedback && submittedAnswers.has(answer.id) && (
                   <div className={`feedback ${answer.correct ? 'correct' : 'incorrect'}`}>
                     {answer.feedback}

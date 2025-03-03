@@ -21,6 +21,7 @@ def get_args():
     args = argparse.ArgumentParser()
     args.add_argument("--url", default="http://localhost:3000")
     args.add_argument("-p", "--prolific-code")
+    args.add_argument("-r", "--prolific-rejection-code")
     args.add_argument("-o", "--output")
     args.add_argument("--schedule-length", type=int, default=5)
     args.add_argument("--limit", type=int)
@@ -81,6 +82,8 @@ def main():
         url = f"{args.url}?annotation_schedule={schedule_encoded}"
         if args.prolific_code:
             url += f"&prolific_code={args.prolific_code}"
+            if args.prolific_rejection_code:
+                url += f"&prolific_rejection_code={args.prolific_rejection_code}"
         else:
             url += "&oneshot=true"
         urls.append(url)

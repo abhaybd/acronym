@@ -2,7 +2,6 @@
   background: #fdf5e6;
   padding: 20px;
   border-radius: 8px;
-  max-width: 1000px;
   margin: 0 auto;
 }
 
@@ -42,7 +41,7 @@
 
 .answer-option {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
   padding: 10px;
   border-radius: 10px;
@@ -68,7 +67,6 @@
 }
 
 .feedback {
-  margin-top: 10px;
   padding: 10px;
   border-radius: 5px;
   font-size: 0.9em;
@@ -118,4 +116,10 @@
 
 .dimmed {
   filter: blur(2px);
+}
+
+.answer-option-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 } 

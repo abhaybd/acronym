@@ -23,7 +23,6 @@ const DataAnnotation = () => {
 
   const navigateToSchedule = (schedule) => {
     searchParams.set("annotation_schedule", encodeStr(JSON.stringify(schedule)));
-    console.log(searchParams.get("annotation_schedule"), JSON.stringify(schedule));
     navigate({
       pathname: "/",
       search: searchParams.toString()

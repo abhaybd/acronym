@@ -4,6 +4,12 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    margin: 0;
+}
+
+.App {
+    max-width: 80%;
+    margin: 0 auto;
 }
 
 .App-header {
