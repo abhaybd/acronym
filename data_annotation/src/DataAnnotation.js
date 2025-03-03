@@ -1,9 +1,6 @@
-import React, { Suspense, useEffect, useState, useRef } from 'react';
-import { Canvas, useLoader } from '@react-three/fiber';
-import { OrbitControls, Environment } from '@react-three/drei';
+import React, { useEffect, useState } from 'react';
 import { createSearchParams, useNavigate, useSearchParams } from 'react-router';
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import ObjectViewer from './ObjectViewer';
 import AnnotationForm from './AnnotationForm';
 import Tutorial from './Tutorial';
 import ProgressBar from './ProgressBar';
@@ -15,19 +12,6 @@ const DataAnnotation = () => {
   const [annotSchedule, setAnnotSchedule] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
-  const orbitRef = useRef();
-
-  useEffect(() => {
-    THREE.Object3D.DEFAULT_UP = new THREE.Vector3(0, 0, 1);
-  }, []);
-
-  useEffect(() => {
-    const hasSeenTutorial = localStorage.getItem('hasSeenTutorial');
-    if (!hasSeenTutorial) {
-      setShowTutorial(true);
-      localStorage.setItem('hasSeenTutorial', 'true');
-    }
-  }, []);
 
   const encodeStr = (str) => {
     return encodeURIComponent(btoa(str));
@@ -97,18 +81,6 @@ const DataAnnotation = () => {
     }
   }, [searchParams]);
 
-  const GLTFMesh = ({ meshURL }) => {
-    const gltf = useLoader(GLTFLoader, meshURL);
-
-    useEffect(() => {
-      setLoading(false);
-    }, [gltf]);
-
-    return (
-      <primitive object={gltf.scene} />
-    );
-  };
-
   const oneshot = searchParams.get('oneshot') === 'true' || searchParams.has("prolific_code");
 
   const onFormSubmit = async () => {
@@ -128,11 +100,6 @@ const DataAnnotation = () => {
 
   const annotInfo = annotSchedule ? annotSchedule.annotations[annotSchedule.idx] : null;
 
-  const getProgress = () => {
-    if (!annotSchedule) return { completed: 0, total: 0 };
-    return { completed: annotSchedule.idx, total: annotSchedule.annotations.length };
-  };
-
   return (
     <div className="data-annotation-container">
       <div className="button-container">
@@ -149,25 +116,13 @@ const DataAnnotation = () => {
       )}
 
       <div className={`content-container ${showTutorial ? 'dimmed' : ''}`}>
-        <div className="canvas-container-toolbar">
-          <div className="canvas-container">
-            {loading && <div className="spinner"></div>}
-            {annotInfo && (
-              <Canvas camera={{ position: [0, 0.4, 0.6], near: 0.05, far: 20, fov: 45 }}>
-                <Suspense fallback={null}>
-                  <Environment preset="sunset" />
-                  <OrbitControls ref={orbitRef} />
-                  <GLTFMesh
-                    meshURL={`/api/get-mesh-data/${annotInfo.object_category}/${annotInfo.object_id}/${annotInfo.grasp_id}`}
-                  />
-                </Suspense>
-              </Canvas>
-            )}
-          </div>
-          <div className="canvas-toolbar">
-            <p className='instructions'>Left click + drag to rotate, right click + drag to pan, scroll to zoom.</p>
-            <button onClick={() => orbitRef.current.reset()} className="ai2-button" disabled={!orbitRef.current}>Reset View</button>
-          </div>
+        <div className="object-viewer-container">
+          <ObjectViewer
+            object_category={annotInfo?.object_category}
+            object_id={annotInfo?.object_id}
+            grasp_id={annotInfo?.grasp_id}
+            onFinishedLoading={() => setLoading(false)}
+          />
         </div>
         <AnnotationForm
           category={annotInfo?.object_category}
