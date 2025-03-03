@@ -5,6 +5,8 @@ import os
 import asyncio
 from tempfile import TemporaryDirectory
 import io
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
 
 import h5py
 import trimesh
@@ -189,4 +191,11 @@ async def submit_annotation(annotation: Annotation):
     s3.upload_fileobj(annot_bytes, BUCKET_NAME, annotation_key)
 
 
-app.mount("/", StaticFiles(directory="data_annotation/build", html=True), name="static")
+app.mount("/static", StaticFiles(directory="data_annotation/build/static"), name="static")
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    if full_path.startswith("api/"):
+        # Let the API routes handle API requests
+        raise HTTPException(status_code=404)
+    return FileResponse("data_annotation/build/index.html")
