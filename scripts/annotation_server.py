@@ -198,4 +198,7 @@ async def serve_spa(full_path: str):
     if full_path.startswith("api/"):
         # Let the API routes handle API requests
         raise HTTPException(status_code=404)
-    return FileResponse("data_annotation/build/index.html")
+    return FileResponse(
+        "data_annotation/build/index.html",
+        headers={"Cache-Control": "no-cache"}
+    )
