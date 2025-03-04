@@ -411,7 +411,8 @@ def generate_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], ob
         "annotations": annots_in_scene,
         "views": [],
         "lighting": lighting,
-        "glb": base64.b64encode(glb_bytes).decode("utf-8")
+        "glb": base64.b64encode(glb_bytes).decode("utf-8"),
+        "img_size": datagen_cfg.img_size
     }
     for (cam_K, cam_pose), annots in zip(views, annots_per_view):
         data["views"].append({
