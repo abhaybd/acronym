@@ -4,6 +4,7 @@ import re
 import argparse
 import time
 from pydantic import BaseModel
+import requests
 from tqdm import tqdm
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,6 +54,7 @@ def get_parser():
     parser.add_argument("--overwrite", action="store_true", help="Reprocess annotations even if they already exist in the destination directory")
     parser.add_argument("--src-prefix", default="semantic-grasping/annotations/", help="The prefix of the source annotations")
     parser.add_argument("--dst-prefix", default="semantic-grasping/annotations-filtered/", help="The prefix of the destination annotations")
+    parser.add_argument("--study", help="The study to filter annotations for")
     return parser
 
 def get_annot_details(s3: S3Client, pfx: str):
@@ -63,7 +65,7 @@ def get_annot_details(s3: S3Client, pfx: str):
     return pfx, annot
 
 def prefilter_annotation(annot: Annotation):
-    return annot.grasp_label != GraspLabel.INFEASIBLE and not annot.is_mesh_malformed
+    return annot.grasp_label != GraspLabel.INFEASIBLE
 
 def generate_query(pfx:str, annot: Annotation):
     return {
@@ -94,7 +96,7 @@ def generate_query(pfx:str, annot: Annotation):
         }
     }
 
-def submit_job(openai: OpenAI, s3: S3Client, overwrite: bool, src_prefix: str, dst_prefix: str):
+def submit_job(openai: OpenAI, s3: S3Client, overwrite: bool, src_prefix: str, dst_prefix: str, users: set[str] | None = None):
     unannotated_pfxs = list_s3_files(s3, BUCKET_NAME, src_prefix)
     if not overwrite:
         annotated_pfxs = set(list_s3_files(s3, BUCKET_NAME, dst_prefix))
@@ -108,7 +110,8 @@ def submit_job(openai: OpenAI, s3: S3Client, overwrite: bool, src_prefix: str, d
         for future in tqdm(as_completed(futures), total=len(futures), dynamic_ncols=True, desc="Fetching annotations"):
             pfx, annot = future.result()
             annot_pfxs.append(pfx)
-            annots.append(annot)
+            if users is None or annot.user_id in users:
+                annots.append(annot)
 
     prefiltered_mask = list(map(prefilter_annotation, annots))
     annot_pfxs = list(compress(annot_pfxs, prefiltered_mask))
@@ -191,7 +194,25 @@ def main():
     s3 = boto3.client("s3")
 
     if args.submit:
-        batch_id, batch_file_id = submit_job(openai, s3, args.overwrite, args.src_prefix, args.dst_prefix)
+        if args.study:
+            token = os.getenv("PROLIFIC_TOKEN")
+            assert token is not None, "PROLIFIC_TOKEN is not set"
+            response = requests.get(
+                "https://api.prolific.com/api/v1/submissions/",
+                headers={"Authorization": f"Token {token}"},
+                params={"study": args.study}
+            )
+            if response.ok:
+                submissions = response.json()
+                users = set()
+                for submission in submissions["results"]:
+                    if submission["status"] == "APPROVED":
+                        users.add(submission["participant_id"])
+            else:
+                raise Exception(f"Failed to retrieve submissions: {response.status_code} {response.text}")
+        else:
+            users = None
+        batch_id, batch_file_id = submit_job(openai, s3, args.overwrite, args.src_prefix, args.dst_prefix, users)
     else:
         batch_id = args.retrieve
         batch_file_id = None
