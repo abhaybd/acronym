@@ -78,6 +78,9 @@ GRASP_LOCAL_POINTS = np.array([
     [-0.041, 0, 0.066]
 ])
 
+with open("data/wall_colors.json", "r") as f:
+    WALL_COLORS = json.load(f)
+
 def homogenize(arr: np.ndarray):
     if arr.ndim == 1:
         return np.concatenate([arr, np.ones(1)])
@@ -118,8 +121,7 @@ def generate_floor_and_walls(scene: ss.Scene, datagen_cfg: DatagenConfig):
     scene.add_object(ss.TrimeshAsset(floor_plane), "floor")
 
     wall_height = scene_bounds[1, 2] + 2.0
-    with open("data/wall_colors.json", "r") as f:
-        wall_color = ImageColor.getrgb(np.random.choice(json.load(f)))
+    wall_color = ImageColor.getrgb(np.random.choice(WALL_COLORS))
     if len(wall_color) == 3:
         wall_color = (*wall_color, 255)
 

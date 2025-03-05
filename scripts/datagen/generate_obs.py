@@ -15,13 +15,18 @@ import pyrender
 import pyrender.light
 import trimesh
 
+import datagen_utils
+assert datagen_utils  # imported for modification to path
+from annotation import Annotation
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_dir", type=str, help="Input directory")
     parser.add_argument("output_dir", type=str, help="Output directory")
     parser.add_argument("--n-proc", type=int, help="Number of processes, if unspecified uses all available cores")
     parser.add_argument("--n-scenes", type=int, help="Total number of scenes to process")
-    parser.add_argument("--img-size", type=int, nargs=2, default=(480, 640), help="Default image size, for best performance this should match the generated data.")
+    parser.add_argument("--img-size", type=int, nargs=2, default=(480, 640),
+                        help="Default image size as (height, width), for best performance this should match the generated data.")
     return parser.parse_args()
 
 @contextmanager
@@ -70,24 +75,25 @@ def set_camera(scene: pyrender.Scene, cam_K: np.ndarray, cam_pose: np.ndarray):
         scene.remove_node(n)
     scene.add_node(camera_light_node)
 
-# TODO test this
 def backproject(cam_K: np.ndarray, depth: np.ndarray):
     height, width = depth.shape
     u, v = np.meshgrid(np.arange(width), np.arange(height), indexing="xy")
     uvd = np.stack((u, v, np.ones_like(u)), axis=-1).astype(np.float32)
     uvd *= np.expand_dims(depth, axis=-1)
-    xyz = uvd.transpose(0, 2, 1) @ np.expand_dims(np.linalg.inv(cam_K).T, axis=0)
+    xyz = uvd @ np.expand_dims(np.linalg.inv(cam_K).T, axis=0)
     return xyz
 
 def render(out_dir: str, scene_path: str):
+    # TODO: need to also save text and construct pairwise comparison matrix
     scene_id = os.path.basename(scene_path)[:-len(".pkl")]
     if os.path.exists(f"{out_dir}/{scene_id}_0_0.pkl"):
         # if one observation was generated, assume all were
+        print(f"Skipping {scene_id} because it already has observations")
         return
 
     with open(scene_path, "rb") as f:
         scene_data = pickle.load(f)
-    all_annotations: dict[str, tuple[any, np.ndarray]] = scene_data["annotations"]
+    all_annotations: dict[str, tuple[Annotation, np.ndarray]] = scene_data["annotations"]
     scene = build_scene(scene_data)
 
     renderer: pyrender.OffscreenRenderer = globals()["renderer"]
@@ -117,12 +123,14 @@ def render(out_dir: str, scene_path: str):
     with block_signals([signal.SIGINT]):
         for view_idx, obs_per_view in enumerate(observations):
             for obs_idx, obs in enumerate(obs_per_view):
-                out_path = f"{out_dir}/{scene_id}_{view_idx}_{obs_idx}.png"
+                out_path = f"{out_dir}/{scene_id}_{view_idx}_{obs_idx}.pkl"
                 with open(out_path, "wb") as f:
                     f.write(obs)
 
 def main():
     args = get_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
 
     nproc = args.n_proc or os.cpu_count()
     with ProcessPoolExecutor(
@@ -132,7 +140,7 @@ def main():
     ) as executor:
         while True:
             scenes: set[str] = set(fn for fn in os.listdir(args.input_dir) if fn.endswith(".pkl"))
-            processed_scenes: set[str] = set(fn.split("_", 1)[0] for fn in os.listdir(args.output_dir) if fn.endswith(".pkl"))
+            processed_scenes: set[str] = set(fn.split("_", 1)[0] + ".pkl" for fn in os.listdir(args.output_dir) if fn.endswith(".pkl"))
             print(f"Total generated observations: {len(processed_scenes)}")
 
             if args.n_scenes and len(processed_scenes) >= args.n_scenes:
@@ -148,9 +156,8 @@ def main():
             batch = batch[:min(len(batch), 4 * nproc)]
 
             futures = [executor.submit(render, args.output_dir, f"{args.input_dir}/{fn}") for fn in batch]
-            for _ in tqdm(as_completed(futures), total=len(futures), desc="Rendering", dynamic_ncols=True):
-                pass
-
+            for f in tqdm(as_completed(futures), total=len(futures), desc="Rendering", dynamic_ncols=True):
+                f.result()
 
 if __name__ == "__main__":
     main()

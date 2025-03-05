@@ -144,6 +144,7 @@ class MeshLibrary(object):
             mesh.apply_translation(-mesh.centroid)
         return mesh
 
+    @lru_cache(maxsize=2048)
     def grasps(self, category: str, obj_id: str):
         T, success = load_grasps(f"data/grasps/{category}_{obj_id}.h5")
         mesh = self._load_mesh(category, obj_id, center=False)
