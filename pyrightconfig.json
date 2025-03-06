@@ -1,0 +1,24 @@
+{
+    "exclude": [
+        "**/__pycache__",
+        "**/.git",
+        "**/.pytest_cache",
+        "**/.mypy_cache",
+        "**/node_modules",
+        "**/*.pyc",
+        "**/venv",
+        "**/env",
+        "**/.env",
+        "**/dist",
+        "**/build",
+        "**/.eggs",
+        "**/*.egg-info",
+        "**/tmp",
+        "**/.tox",
+        "**/.coverage",
+        "**/.DS_Store",
+        "**/data",
+        "**/annotations",
+        "**/annotations_filtered"
+    ],
+} 
