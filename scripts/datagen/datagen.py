@@ -1,11 +1,16 @@
 import argparse
 from concurrent.futures import ProcessPoolExecutor, Future, as_completed
-import io
 import json
 import os
 import pickle
 import time
 import uuid
+import base64
+
+# pyrender spawns a lot of OMP threads, limiting to 1 significantly reduces overhead
+if os.environ.get("OMP_NUM_THREADS") is None:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import boto3
 from tqdm import tqdm
 import numpy as np
@@ -13,9 +18,8 @@ import trimesh
 from trimesh import transformations as tra
 from pydantic import BaseModel
 from itertools import compress
-import base64
-
 from PIL import Image, ImageColor
+import yaml
 
 from datagen_utils import (
     kelvin_to_rgb,
@@ -403,7 +407,7 @@ def generate_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], ob
     scene, views, annots_in_scene, annots_per_view = rejection_sample(
         lambda: sample_scene(datagen_cfg, annotations, object_library, background_library, support_library),
         not_none,
-        100
+        -1
     )
     lighting = generate_lighting(scene, datagen_cfg)
 
@@ -422,7 +426,7 @@ def generate_scene(datagen_cfg: DatagenConfig, annotations: list[Annotation], ob
             "cam_pose": cam_pose,
             "annotations_in_view": annots
         })
-    return data
+    return data, scene
 
 def procgen_init():
     annotations: list[Annotation] = []
@@ -451,7 +455,7 @@ def procgen_init():
     threading.Thread(target=exit_if_orphaned, daemon=True).start()
 
 def procgen_worker(datagen_cfg: DatagenConfig, out_dir: str):
-    data = generate_scene(
+    data, scene = generate_scene(
         datagen_cfg,
         globals()["annotations"],
         globals()["object_library"],
@@ -459,8 +463,14 @@ def procgen_worker(datagen_cfg: DatagenConfig, out_dir: str):
         globals()["support_library"]
     )
     scene_id = uuid.uuid4().hex
-    with open(f"{out_dir}/{scene_id}.pkl", "wb") as f:
+    os.mkdir(f"{out_dir}/{scene_id}")
+    with open(f"{out_dir}/{scene_id}/scene.pkl", "wb") as f:
         pickle.dump(data, f)
+    objects_in_scene = [obj for obj in scene.get_object_names() if obj.startswith("object_")]
+    with open(f"{out_dir}/{scene_id}/metadata.yaml", "w") as f:
+        yaml.dump({
+            "objects": objects_in_scene,
+        }, f)
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -492,7 +502,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    n_existing_samples = sum(1 for fn in os.listdir(args.out_dir) if fn.endswith(".pkl"))
+    n_existing_samples = sum(1 for fn in os.listdir(args.out_dir) if os.path.isdir(f"{args.out_dir}/{fn}"))
     n_samples = args.n_samples - n_existing_samples
     if n_samples <= 0:
         print(f"Already have {n_existing_samples} samples, skipping")
@@ -523,6 +533,7 @@ def main():
                 set_exit_event()
                 executor.shutdown(wait=False)
                 raise
+    print("Done!")
 
 def main_test():
     annotations: list[Annotation] = []
@@ -543,7 +554,7 @@ def main_test():
 
     datagen_cfg = DatagenConfig()
 
-    data = generate_scene(datagen_cfg, annotations, object_library, background_library, support_library)
+    data, _ = generate_scene(datagen_cfg, annotations, object_library, background_library, support_library)
     with open("tmp/scene.pkl", "wb") as f:
         pickle.dump(data, f)
 

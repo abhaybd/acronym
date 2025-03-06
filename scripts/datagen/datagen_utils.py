@@ -6,6 +6,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import trimesh
 from multiprocessing import Event
+from itertools import count
 
 from acronym_tools import load_mesh, load_grasps
 
@@ -30,7 +31,7 @@ def not_none(x: Any):
 U = TypeVar("U")
 
 def rejection_sample(sampler_fn: Callable[[], U], condition_fn: Callable[[U], bool], max_iters: int = 1000) -> U:
-    for _ in range(max_iters):
+    for _ in (range(max_iters) if max_iters > 0 else count()):
         if should_exit():
             raise KeyboardInterrupt()
         sample = sampler_fn()

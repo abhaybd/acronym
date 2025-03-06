@@ -1,5 +1,6 @@
 import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, Future
+import multiprocessing as mp
 from io import BytesIO
 import os
 import pickle
@@ -9,11 +10,20 @@ from base64 import b64decode
 from contextlib import contextmanager
 import signal
 
+import yaml
+
+if os.environ.get("PYOPENGL_PLATFORM") is None:
+    os.environ["PYOPENGL_PLATFORM"] = "egl"
+# pyrender spawns a lot of OMP threads, limiting to 1 significantly reduces overhead
+if os.environ.get("OMP_NUM_THREADS") is None:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
 import numpy as np
 from tqdm import tqdm
 import pyrender
 import pyrender.light
 import trimesh
+from PIL import Image
 
 import datagen_utils
 assert datagen_utils  # imported for modification to path
@@ -38,7 +48,15 @@ def block_signals(signals: list[int]):
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous_blocked)
 
+worker_id = mp.Value("i", 0)
+
 def worker_init(img_size: tuple[int, int]):
+    n_gpus = int(os.popen("nvidia-smi --list-gpus | wc -l").read())
+    with worker_id.get_lock():
+        gpu_id = worker_id.value % n_gpus
+        worker_id.value += 1
+    os.environ["EGL_DEVICE_ID"] = str(gpu_id)
+
     height, width = img_size
     renderer = pyrender.OffscreenRenderer(width, height)
     globals()["renderer"] = renderer
@@ -83,15 +101,15 @@ def backproject(cam_K: np.ndarray, depth: np.ndarray):
     xyz = uvd @ np.expand_dims(np.linalg.inv(cam_K).T, axis=0)
     return xyz
 
-def render(out_dir: str, scene_path: str):
+def render(out_dir: str, scene_dir: str):
     # TODO: need to also save text and construct pairwise comparison matrix
-    scene_id = os.path.basename(scene_path)[:-len(".pkl")]
-    if os.path.exists(f"{out_dir}/{scene_id}_0_0.pkl"):
+    scene_id = os.path.basename(scene_dir)
+    if os.path.isdir(f"{out_dir}/{scene_id}"):
         # if one observation was generated, assume all were
         print(f"Skipping {scene_id} because it already has observations")
         return
 
-    with open(scene_path, "rb") as f:
+    with open(f"{scene_dir}/scene.pkl", "rb") as f:
         scene_data = pickle.load(f)
     all_annotations: dict[str, tuple[Annotation, np.ndarray]] = scene_data["annotations"]
     scene = build_scene(scene_data)
@@ -99,7 +117,8 @@ def render(out_dir: str, scene_path: str):
     renderer: pyrender.OffscreenRenderer = globals()["renderer"]
     renderer.viewport_height, renderer.viewport_width = scene_data["img_size"]
 
-    observations: list[list[bytes]] = []
+    obs_per_view: list[list[tuple[dict, Annotation, str]]] = []
+    rgb_per_view: list[np.ndarray] = []
     for view in scene_data["views"]:
         cam_K = np.array(view["cam_K"])
         cam_pose = np.array(view["cam_pose"])
@@ -107,25 +126,45 @@ def render(out_dir: str, scene_path: str):
 
         color, depth = renderer.render(scene, flags=pyrender.RenderFlags.SHADOWS_DIRECTIONAL)
         xyz = backproject(cam_K, depth)
-
-        obs_per_view = []
+        rgb_per_view.append(color)
+        obs = []
         for annot_id in view["annotations_in_view"]:
-            _, grasp_pose = all_annotations[annot_id]
+            annot, grasp_pose = all_annotations[annot_id]
             grasp_pose_in_cam_frame = np.linalg.solve(cam_pose, grasp_pose)
             obs_data = {
                 "rgb": color,
                 "xyz": xyz,
                 "grasp_pose": grasp_pose_in_cam_frame,
             }
-            obs_per_view.append(pickle.dumps(obs_data))
-        observations.append(obs_per_view)
+            # obs.append(pickle.dumps(obs_data))
+            obs.append((obs_data, annot, annot_id))
+        obs_per_view.append(obs)
 
     with block_signals([signal.SIGINT]):
-        for view_idx, obs_per_view in enumerate(observations):
-            for obs_idx, obs in enumerate(obs_per_view):
-                out_path = f"{out_dir}/{scene_id}_{view_idx}_{obs_idx}.pkl"
-                with open(out_path, "wb") as f:
-                    f.write(obs)
+        for view_idx, (rgb, obs) in enumerate(zip(rgb_per_view, obs_per_view)):
+            view_dir = f"{out_dir}/{scene_id}/view_{view_idx}"
+            os.makedirs(view_dir, exist_ok=True)
+            Image.fromarray(rgb).save(f"{view_dir}/rgb.png")
+            for obs_idx, (obs_data, annot, annot_id) in enumerate(obs):
+                obs_dir = f"{view_dir}/obs_{obs_idx}"
+                os.makedirs(obs_dir, exist_ok=True)
+                with open(f"{obs_dir}/obs.pkl", "wb") as f:
+                    pickle.dump(obs_data, f)
+                with open(f"{obs_dir}/annot.yaml", "w") as f:
+                    yaml.dump({
+                        "annotation_id": annot_id,
+                        "annotation": annot.grasp_description
+                    }, f)
+
+class DummyExecutor:
+    def __init__(self, initializer, initargs, **kwargs):
+        initializer(*initargs)
+
+    def submit(self, fn, *args, **kwargs):
+        ret = fn(*args, **kwargs)
+        f = Future()
+        f.set_result(ret)
+        return f
 
 def main():
     args = get_args()
@@ -133,14 +172,15 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     nproc = args.n_proc or os.cpu_count()
-    with ProcessPoolExecutor(
+    multiproc = nproc > 1
+    with (ProcessPoolExecutor if multiproc else DummyExecutor)(
         max_workers=nproc,
         initializer=worker_init,
         initargs=(args.img_size,)
     ) as executor:
         while True:
-            scenes: set[str] = set(fn for fn in os.listdir(args.input_dir) if fn.endswith(".pkl"))
-            processed_scenes: set[str] = set(fn.split("_", 1)[0] + ".pkl" for fn in os.listdir(args.output_dir) if fn.endswith(".pkl"))
+            scenes: set[str] = set(fn for fn in os.listdir(args.input_dir) if os.path.isdir(f"{args.input_dir}/{fn}"))
+            processed_scenes: set[str] = set(fn for fn in os.listdir(args.output_dir) if os.path.isdir(f"{args.output_dir}/{fn}"))
             print(f"Total generated observations: {len(processed_scenes)}")
 
             if args.n_scenes and len(processed_scenes) >= args.n_scenes:
@@ -155,9 +195,13 @@ def main():
             random.shuffle(batch)  # shuffled to avoid different workers processing the same scenes
             batch = batch[:min(len(batch), 4 * nproc)]
 
-            futures = [executor.submit(render, args.output_dir, f"{args.input_dir}/{fn}") for fn in batch]
-            for f in tqdm(as_completed(futures), total=len(futures), desc="Rendering", dynamic_ncols=True):
-                f.result()
+            futures: list[Future] = []
+            # if not multiproc, work happens here - otherwise happens in next loop
+            for fn in tqdm(batch, desc="Rendering", dynamic_ncols=True, disable=multiproc):
+                futures.append(executor.submit(render, args.output_dir, f"{args.input_dir}/{fn}"))
+            if multiproc:
+                for f in tqdm(as_completed(futures), total=len(futures), desc="Rendering", dynamic_ncols=True, smoothing=0):
+                    f.result()
 
 if __name__ == "__main__":
     main()
