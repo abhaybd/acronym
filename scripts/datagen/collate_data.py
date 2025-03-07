@@ -25,7 +25,8 @@ def main():
 
             annot_id = annotation["annotation_id"]
             annot_desc = annotation["annotation"]
-            data_path = os.path.relpath(annotation_path.replace("annot.yaml", "data.pkl"), args.observation_dir)
+            data_path = os.path.relpath(annotation_path.replace("annot.yaml", "obs.pkl"), args.observation_dir)
+            assert os.path.isfile(os.path.join(args.observation_dir, data_path)), f"File {data_path} does not exist"
 
             writer.writerow([annot_id, annot_desc, data_path])
 
